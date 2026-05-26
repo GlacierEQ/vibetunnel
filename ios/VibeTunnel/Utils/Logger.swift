@@ -34,9 +34,9 @@ struct Logger {
     /// Global log level threshold - only messages at this level or higher will be logged
     nonisolated(unsafe) static var globalLevel: LogLevel = {
         #if DEBUG
-            return .info
+        return .info
         #else
-            return .warning
+        return .warning
         #endif
     }()
 
@@ -46,28 +46,33 @@ struct Logger {
         self.osLogger = os.Logger(subsystem: "sh.vibetunnel.ios", category: category)
     }
 
-    func verbose(_ message: String) {
+    func verbose(_ message: @autoclosure () -> String) {
         guard LogLevel.verbose >= Self.globalLevel else { return }
-        osLogger.trace("\(message, privacy: .public)")
+        let message = message()
+        self.osLogger.trace("\(message, privacy: .public)")
     }
 
-    func debug(_ message: String) {
+    func debug(_ message: @autoclosure () -> String) {
         guard LogLevel.debug >= Self.globalLevel else { return }
-        osLogger.debug("\(message, privacy: .public)")
+        let message = message()
+        self.osLogger.debug("\(message, privacy: .public)")
     }
 
-    func info(_ message: String) {
+    func info(_ message: @autoclosure () -> String) {
         guard LogLevel.info >= Self.globalLevel else { return }
-        osLogger.info("\(message, privacy: .public)")
+        let message = message()
+        self.osLogger.info("\(message, privacy: .public)")
     }
 
-    func warning(_ message: String) {
+    func warning(_ message: @autoclosure () -> String) {
         guard LogLevel.warning >= Self.globalLevel else { return }
-        osLogger.warning("\(message, privacy: .public)")
+        let message = message()
+        self.osLogger.warning("\(message, privacy: .public)")
     }
 
-    func error(_ message: String) {
+    func error(_ message: @autoclosure () -> String) {
         guard LogLevel.error >= Self.globalLevel else { return }
-        osLogger.error("\(message, privacy: .public)")
+        let message = message()
+        self.osLogger.error("\(message, privacy: .public)")
     }
 }

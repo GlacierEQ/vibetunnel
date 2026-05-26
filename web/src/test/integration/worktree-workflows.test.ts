@@ -44,7 +44,6 @@ describe('Worktree Workflows Integration Tests', () => {
     }
 
     // Stop services (without killing all sessions)
-    testServer.activityMonitor.stop();
 
     // Clean up repository
     await gitRepo.cleanup();
@@ -233,7 +232,7 @@ describe('Worktree Workflows Integration Tests', () => {
         .send({
           command: ['bash'],
           workingDir: gitRepo.repoPath,
-          titleMode: 'dynamic',
+          titleMode: 'static',
         });
 
       expect(createResponse.status).toBe(200);

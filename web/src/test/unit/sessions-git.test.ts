@@ -41,14 +41,6 @@ vi.mock('../../server/services/terminal-manager.js', () => ({
   TerminalManager: vi.fn(),
 }));
 
-vi.mock('../../server/services/activity-monitor.js', () => ({
-  ActivityMonitor: vi.fn(),
-}));
-
-vi.mock('../../server/services/stream-watcher.js', () => ({
-  StreamWatcher: vi.fn(),
-}));
-
 vi.mock('../../server/services/remote-registry.js', () => ({
   RemoteRegistry: vi.fn(),
 }));
@@ -104,17 +96,13 @@ describe('Session Creation with Git Info', () => {
     app.use(express.json());
 
     const mockTerminalManager = { getTerminalById: vi.fn() };
-    const mockActivityMonitor = {};
-    const mockStreamWatcher = {};
     const mockRemoteRegistry = null;
 
     const config = {
       ptyManager: { createSession: mockCreateSession },
       terminalManager: mockTerminalManager,
-      streamWatcher: mockStreamWatcher,
       remoteRegistry: mockRemoteRegistry,
       isHQMode: false,
-      activityMonitor: mockActivityMonitor,
     };
 
     app.use('/api', sessionsModule.createSessionRoutes(config));
@@ -357,7 +345,7 @@ describe('Session Creation with Git Info', () => {
   });
 
   describe('Session Name Generation with Git', () => {
-    it.skip('should include Git branch in dynamic title mode - git detection removed from session creation', async () => {
+    it.skip('should include Git branch in static title mode - git detection removed from session creation', async () => {
       // Mock Git commands
       mockExecFile
         .mockResolvedValueOnce({
@@ -382,7 +370,7 @@ describe('Session Creation with Git Info', () => {
         .send({
           command: ['node', 'app.js'],
           workingDir: '/home/user/project',
-          titleMode: 'dynamic',
+          titleMode: 'static',
         });
 
       expect(response.status).toBe(200);
@@ -391,7 +379,7 @@ describe('Session Creation with Git Info', () => {
       expect(mockCreateSession).toHaveBeenCalledWith(
         ['node', 'app.js'],
         expect.objectContaining({
-          titleMode: 'dynamic',
+          titleMode: 'static',
           gitRepoPath: '/home/user/project',
           gitBranch: 'develop',
         })

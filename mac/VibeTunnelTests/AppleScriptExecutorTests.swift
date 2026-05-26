@@ -5,12 +5,11 @@ import Testing
 @Suite(
     "AppleScript Executor Tests",
     .tags(.integration),
-    .disabled(if: TestConditions.isRunningInCI(), "AppleScript not available in CI")
-)
+    .disabled(if: TestConditions.isRunningInCI(), "AppleScript not available in CI"))
 struct AppleScriptExecutorTests {
-    @Test("Execute simple AppleScript")
+    @Test
     @MainActor
-    func executeSimpleScript() throws {
+    func executeSimpleApplescript() throws {
         let script = """
         return "Hello from AppleScript"
         """
@@ -19,7 +18,7 @@ struct AppleScriptExecutorTests {
         #expect(result == "Hello from AppleScript")
     }
 
-    @Test("Execute script with math")
+    @Test
     @MainActor
     func executeScriptWithMath() throws {
         let script = """
@@ -30,7 +29,7 @@ struct AppleScriptExecutorTests {
         #expect(result == "4")
     }
 
-    @Test("Handle script error")
+    @Test
     @MainActor
     func handleScriptError() throws {
         let script = """
@@ -45,7 +44,7 @@ struct AppleScriptExecutorTests {
         }
     }
 
-    @Test("Handle invalid syntax")
+    @Test
     @MainActor
     func handleInvalidSyntax() throws {
         let script = """
@@ -61,7 +60,7 @@ struct AppleScriptExecutorTests {
         }
     }
 
-    @Test("Execute empty script")
+    @Test
     @MainActor
     func executeEmptyScript() throws {
         let script = ""
@@ -75,7 +74,7 @@ struct AppleScriptExecutorTests {
         }
     }
 
-    @Test("Check Terminal application", .tags(.slow))
+    @Test(.tags(.slow))
     @MainActor
     func checkTerminalApplication() throws {
         // Skip in CI to avoid timing issues
@@ -91,7 +90,7 @@ struct AppleScriptExecutorTests {
         #expect(result == "true" || result == "false")
     }
 
-    @Test("Test async execution", .tags(.slow))
+    @Test(.tags(.slow))
     func asyncExecution() async throws {
         // Skip in CI to avoid timing issues
         try #require(!TestConditions.isRunningInCI(), "Skipping async AppleScript test in CI")
@@ -100,7 +99,7 @@ struct AppleScriptExecutorTests {
         #expect(hasPermission == true || hasPermission == false)
     }
 
-    @Test("Singleton instance")
+    @Test
     @MainActor
     func singletonInstance() {
         let instance1 = AppleScriptExecutor.shared

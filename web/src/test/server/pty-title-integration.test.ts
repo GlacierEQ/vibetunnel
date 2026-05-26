@@ -62,26 +62,6 @@ describe('PTY Terminal Title Integration', () => {
     expect(session?.titleMode).toBe(TitleMode.STATIC);
   });
 
-  it('should set terminal title in dynamic mode', async () => {
-    const sessionId = `t-${Math.random().toString(36).substring(2, 8)}`;
-    testSessionIds.push(sessionId);
-
-    const _result = await ptyManager.createSession(['echo', 'test'], {
-      sessionId,
-      name: 'test-session',
-      workingDir: process.cwd(),
-      titleMode: TitleMode.DYNAMIC,
-    });
-
-    expect(_result.sessionId).toBe(sessionId);
-
-    // Get the internal session to verify it was created with dynamic title mode
-    const session = ptyManager.getInternalSession(sessionId);
-    expect(session).toBeDefined();
-    expect(session?.titleMode).toBe(TitleMode.DYNAMIC);
-    expect(session?.activityDetector).toBeDefined();
-  });
-
   it('should not set terminal title when mode is none', async () => {
     const sessionId = `t-${Math.random().toString(36).substring(2, 8)}`;
     testSessionIds.push(sessionId);
@@ -97,7 +77,7 @@ describe('PTY Terminal Title Integration', () => {
     expect(session?.titleMode).toBe(TitleMode.NONE);
   });
 
-  it('should track current working directory in static and dynamic modes', async () => {
+  it('should track current working directory in static mode', async () => {
     const sessionId = `t-${Math.random().toString(36).substring(2, 8)}`;
     testSessionIds.push(sessionId);
 
@@ -139,11 +119,11 @@ describe('PTY Terminal Title Integration', () => {
     expect(session?.titleMode).toBe(TitleMode.FILTER);
   });
 
-  it('should handle Claude commands with dynamic mode by default', async () => {
+  it('should not auto-select title mode for Claude commands', async () => {
     const sessionId = `t-${Math.random().toString(36).substring(2, 8)}`;
     testSessionIds.push(sessionId);
 
-    // Don't specify titleMode - should auto-detect for Claude
+    // Don't specify titleMode - should stay at NONE
     const _result = await ptyManager.createSession(['claude', '--help'], {
       sessionId,
       name: 'claude-session',
@@ -153,9 +133,8 @@ describe('PTY Terminal Title Integration', () => {
     const session = ptyManager.getInternalSession(sessionId);
     expect(session).toBeDefined();
 
-    // Claude commands should default to dynamic mode
-    expect(session?.titleMode).toBe(TitleMode.DYNAMIC);
-    expect(session?.activityDetector).toBeDefined();
+    // Claude commands should not auto-select a title mode
+    expect(session?.titleMode).toBe(TitleMode.NONE);
   });
 
   it('should respect explicit title mode even for Claude', async () => {

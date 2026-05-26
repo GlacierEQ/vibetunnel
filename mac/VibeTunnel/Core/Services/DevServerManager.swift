@@ -30,16 +30,16 @@ final class DevServerManager: ObservableObject {
         }
 
         // Check if pnpm is installed
-        guard isPnpmInstalled() else {
+        guard self.isPnpmInstalled() else {
             return .invalid("pnpm is not installed. Install it with: npm install -g pnpm")
         }
 
         // Check if dev script exists
-        guard hasDevScript(at: packageJsonPath) else {
+        guard self.hasDevScript(at: packageJsonPath) else {
             return .invalid("No 'dev' script found in package.json")
         }
 
-        logger.info("Dev server path validated successfully: \(expandedPath)")
+        self.logger.info("Dev server path validated successfully: \(expandedPath)")
         return .valid
     }
 
@@ -52,7 +52,7 @@ final class DevServerManager: ObservableObject {
             "/usr/bin/pnpm",
             NSString("~/Library/pnpm/pnpm").expandingTildeInPath,
             NSString("~/.local/share/pnpm/pnpm").expandingTildeInPath,
-            NSString("~/Library/Caches/fnm_multishells/*/bin/pnpm").expandingTildeInPath
+            NSString("~/Library/Caches/fnm_multishells/*/bin/pnpm").expandingTildeInPath,
         ]
 
         // Check common paths first
@@ -75,7 +75,7 @@ final class DevServerManager: ObservableObject {
             "\(homePath)/Library/pnpm",
             "\(homePath)/.local/share/pnpm",
             "/usr/local/bin",
-            "/opt/homebrew/bin"
+            "/opt/homebrew/bin",
         ].joined(separator: ":")
 
         if let existingPath = environment["PATH"] {
@@ -96,13 +96,13 @@ final class DevServerManager: ObservableObject {
                     if let output = String(data: data, encoding: .utf8)?
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     {
-                        logger.debug("Found pnpm via shell at: \(output)")
+                        self.logger.debug("Found pnpm via shell at: \(output)")
                     }
                 }
                 return true
             }
         } catch {
-            logger.error("Failed to check for pnpm: \(error.localizedDescription)")
+            self.logger.error("Failed to check for pnpm: \(error.localizedDescription)")
         }
 
         return false
@@ -110,14 +110,17 @@ final class DevServerManager: ObservableObject {
 
     /// Checks if package.json has a dev script
     private func hasDevScript(at packageJsonPath: String) -> Bool {
+        struct PackageJSON: Decodable {
+            let scripts: [String: String]?
+        }
+
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: packageJsonPath)),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let scripts = json["scripts"] as? [String: String]
+              let package = try? JSONDecoder().decode(PackageJSON.self, from: data)
         else {
             return false
         }
 
-        return scripts["dev"] != nil
+        return package.scripts?["dev"] != nil
     }
 
     /// Gets the expanded path for a given path string
@@ -133,7 +136,7 @@ final class DevServerManager: ObservableObject {
             "/opt/homebrew/bin/pnpm",
             "/usr/bin/pnpm",
             NSString("~/Library/pnpm/pnpm").expandingTildeInPath,
-            NSString("~/.local/share/pnpm/pnpm").expandingTildeInPath
+            NSString("~/.local/share/pnpm/pnpm").expandingTildeInPath,
         ]
 
         // Check common paths first
@@ -155,7 +158,7 @@ final class DevServerManager: ObservableObject {
             "\(homePath)/Library/pnpm",
             "\(homePath)/.local/share/pnpm",
             "/usr/local/bin",
-            "/opt/homebrew/bin"
+            "/opt/homebrew/bin",
         ].joined(separator: ":")
 
         if let existingPath = environment["PATH"] {
@@ -180,7 +183,7 @@ final class DevServerManager: ObservableObject {
                 }
             }
         } catch {
-            logger.error("Failed to find pnpm path: \(error.localizedDescription)")
+            self.logger.error("Failed to find pnpm path: \(error.localizedDescription)")
         }
 
         return nil
@@ -216,7 +219,15 @@ final class DevServerManager: ObservableObject {
             .bool(forKey: AppConstants.UserDefaultsKeys.tailscaleServeEnabled)
         if tailscaleServeEnabled {
             args.append("--enable-tailscale-serve")
-            logger.info("Tailscale Serve integration enabled")
+            self.logger.info("Tailscale Serve integration enabled")
+        }
+
+        // Add Tailscale Funnel integration if enabled
+        let tailscaleFunnelEnabled = UserDefaults.standard
+            .bool(forKey: AppConstants.UserDefaultsKeys.tailscaleFunnelEnabled)
+        if tailscaleFunnelEnabled {
+            args.append("--enable-tailscale-funnel")
+            self.logger.warning("Tailscale Funnel integration enabled - PUBLIC INTERNET ACCESS")
         }
 
         return args

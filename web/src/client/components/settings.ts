@@ -11,22 +11,9 @@ import {
 import { RepositoryService } from '../services/repository-service.js';
 import { ServerConfigService } from '../services/server-config-service.js';
 import { createLogger } from '../utils/logger.js';
-import { type MediaQueryState, responsiveObserver } from '../utils/responsive-utils.js';
 import { VERSION } from '../version.js';
 
 const logger = createLogger('settings');
-
-export interface AppPreferences {
-  useDirectKeyboard: boolean;
-  useBinaryMode: boolean;
-}
-
-const DEFAULT_APP_PREFERENCES: AppPreferences = {
-  useDirectKeyboard: true, // Default to modern direct keyboard for new users
-  useBinaryMode: false, // Default to SSE/RSC mode for compatibility
-};
-
-export const STORAGE_KEY = 'vibetunnel_app_preferences';
 
 @customElement('vt-settings')
 export class Settings extends LitElement {
@@ -47,22 +34,19 @@ export class Settings extends LitElement {
   @state() private testingNotification = false;
 
   // App settings state
-  @state() private appPreferences: AppPreferences = DEFAULT_APP_PREFERENCES;
   @state() private repositoryBasePath = DEFAULT_REPOSITORY_BASE_PATH;
-  @state() private mediaState: MediaQueryState = responsiveObserver.getCurrentState();
   @state() private repositoryCount = 0;
   @state() private isDiscoveringRepositories = false;
 
   private permissionChangeUnsubscribe?: () => void;
   private subscriptionChangeUnsubscribe?: () => void;
-  private unsubscribeResponsive?: () => void;
   private repositoryService?: RepositoryService;
   private serverConfigService?: ServerConfigService;
 
   connectedCallback() {
     super.connectedCallback();
     this.initializeNotifications();
-    this.loadAppPreferences();
+    this.loadSettings();
 
     // Initialize services
     this.serverConfigService = new ServerConfigService(this.authClient);
@@ -71,11 +55,6 @@ export class Settings extends LitElement {
     if (this.authClient) {
       this.repositoryService = new RepositoryService(this.authClient, this.serverConfigService);
     }
-
-    // Subscribe to responsive changes
-    this.unsubscribeResponsive = responsiveObserver.subscribe((state) => {
-      this.mediaState = state;
-    });
   }
 
   disconnectedCallback() {
@@ -85,9 +64,6 @@ export class Settings extends LitElement {
     }
     if (this.subscriptionChangeUnsubscribe) {
       this.subscriptionChangeUnsubscribe();
-    }
-    if (this.unsubscribeResponsive) {
-      this.unsubscribeResponsive();
     }
     // Clean up keyboard listener
     document.removeEventListener('keydown', this.handleKeyDown);
@@ -176,17 +152,12 @@ export class Settings extends LitElement {
 
     // When dialog becomes visible, refresh the config to ensure sync
     if (changedProperties.has('visible') && this.visible) {
-      this.loadAppPreferences();
+      this.loadSettings();
     }
   }
 
-  private async loadAppPreferences() {
+  private async loadSettings() {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        this.appPreferences = { ...DEFAULT_APP_PREFERENCES, ...JSON.parse(stored) };
-      }
-
       // Fetch server configuration - force refresh when dialog opens
       if (this.serverConfigService) {
         try {
@@ -206,22 +177,7 @@ export class Settings extends LitElement {
         this.discoverRepositories();
       }
     } catch (error) {
-      logger.error('Failed to load app preferences', error);
-    }
-  }
-
-  private saveAppPreferences() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.appPreferences));
-
-      // Dispatch event to notify app about preference changes
-      window.dispatchEvent(
-        new CustomEvent('app-preferences-changed', {
-          detail: this.appPreferences,
-        })
-      );
-    } catch (error) {
-      logger.error('Failed to save app preferences', error);
+      logger.error('Failed to load settings', error);
     }
   }
 
@@ -445,12 +401,6 @@ export class Settings extends LitElement {
     }
   }
 
-  private handleAppPreferenceChange(key: keyof AppPreferences, value: boolean | string) {
-    // Update locally
-    this.appPreferences = { ...this.appPreferences, [key]: value };
-    this.saveAppPreferences();
-  }
-
   private async handleRepositoryBasePathChange(value: string) {
     if (this.serverConfigService) {
       try {
@@ -650,7 +600,6 @@ export class Settings extends LitElement {
                           ${this.renderNotificationToggle('commandError', 'Session Errors', 'When commands fail with non-zero exit codes')}
                           ${this.renderNotificationToggle('commandCompletion', 'Command Completion', 'When commands taking >3 seconds finish (builds, tests, etc.)')}
                           ${this.renderNotificationToggle('bell', 'System Alerts', 'Terminal bell (^G) from vim, IRC mentions, completion sounds')}
-                          ${this.renderNotificationToggle('claudeTurn', 'Claude Turn', 'When Claude AI finishes responding and awaits input')}
                         </div>
                       </div>
 
@@ -678,7 +627,7 @@ export class Settings extends LitElement {
 
                     <!-- Debug section (only in development) -->
                     ${
-                      process.env.NODE_ENV === 'development'
+                      typeof process !== 'undefined' && process.env?.NODE_ENV === 'development'
                         ? html`
                       <div class="mt-3 pt-3 border-t border-border/50">
                         <p class="text-xs text-muted mb-2">Debug Information</p>
@@ -740,39 +689,6 @@ export class Settings extends LitElement {
       <div class="space-y-4">
         <h3 class="text-md font-bold text-primary mb-3">Application</h3>
         
-        <!-- Direct keyboard input (Mobile only) -->
-        ${
-          this.mediaState.isMobile
-            ? html`
-              <div class="flex items-center justify-between p-4 bg-bg-tertiary rounded-lg border border-border/50">
-                <div class="flex-1">
-                  <label class="text-primary font-medium">
-                    Use Direct Keyboard
-                  </label>
-                  <p class="text-muted text-xs mt-1">
-                    Capture keyboard input directly without showing a text field (desktop-like experience)
-                  </p>
-                </div>
-                <button
-                  role="switch"
-                  aria-checked="${this.appPreferences.useDirectKeyboard}"
-                  @click=${() => this.handleAppPreferenceChange('useDirectKeyboard', !this.appPreferences.useDirectKeyboard)}
-                  class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-base ${
-                    this.appPreferences.useDirectKeyboard ? 'bg-primary' : 'bg-border'
-                  }"
-                >
-                  <span
-                    class="inline-block h-5 w-5 transform rounded-full bg-bg-elevated transition-transform ${
-                      this.appPreferences.useDirectKeyboard ? 'translate-x-5' : 'translate-x-0.5'
-                    }"
-                  ></span>
-                </button>
-              </div>
-            `
-            : ''
-        }
-
-
         <!-- Repository Base Path -->
         <div class="p-4 bg-bg-tertiary rounded-lg border border-border/50">
           <div class="mb-3">

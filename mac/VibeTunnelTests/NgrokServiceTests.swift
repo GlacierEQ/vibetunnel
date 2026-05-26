@@ -5,9 +5,9 @@ import Testing
 @Suite("Ngrok Service Tests", .tags(.networking))
 struct NgrokServiceTests {
     let testAuthToken = "test_auth_token_123"
-    let testPort = 8_888
+    let testPort = 8888
 
-    @Test("Singleton instance")
+    @Test
     @MainActor
     func singletonInstance() {
         let instance1 = NgrokService.shared
@@ -15,7 +15,7 @@ struct NgrokServiceTests {
         #expect(instance1 === instance2)
     }
 
-    @Test("Initial state")
+    @Test
     @MainActor
     func initialState() {
         let service = NgrokService.shared
@@ -24,7 +24,7 @@ struct NgrokServiceTests {
         #expect(service.tunnelStatus == nil)
     }
 
-    @Test("Auth token management")
+    @Test
     @MainActor
     func authTokenManagement() {
         let service = NgrokService.shared
@@ -33,8 +33,8 @@ struct NgrokServiceTests {
         let originalToken = service.authToken
 
         // Set test token
-        service.authToken = testAuthToken
-        #expect(service.authToken == testAuthToken)
+        service.authToken = self.testAuthToken
+        #expect(service.authToken == self.testAuthToken)
         #expect(service.hasAuthToken == true)
 
         // Clear token
@@ -46,9 +46,9 @@ struct NgrokServiceTests {
         service.authToken = originalToken
     }
 
-    @Test("Start without auth token fails")
+    @Test
     @MainActor
-    func startWithoutAuthToken() async throws {
+    func startWithoutAuthTokenFails() async throws {
         let service = NgrokService.shared
 
         // Save original token
@@ -58,7 +58,7 @@ struct NgrokServiceTests {
         service.authToken = nil
 
         do {
-            _ = try await service.start(port: testPort)
+            _ = try await service.start(port: self.testPort)
             Issue.record("Expected error to be thrown")
         } catch let error as NgrokError {
             #expect(error == .authTokenMissing)
@@ -70,7 +70,7 @@ struct NgrokServiceTests {
         service.authToken = originalToken
     }
 
-    @Test("Stop when not running")
+    @Test
     @MainActor
     func stopWhenNotRunning() async throws {
         let service = NgrokService.shared
@@ -87,7 +87,7 @@ struct NgrokServiceTests {
         #expect(service.publicUrl == nil)
     }
 
-    @Test("Is running check")
+    @Test
     @MainActor
     func isRunningCheck() async {
         let service = NgrokService.shared
@@ -96,7 +96,7 @@ struct NgrokServiceTests {
         #expect(running == service.isActive)
     }
 
-    @Test("Get status when inactive")
+    @Test
     @MainActor
     func getStatusWhenInactive() async {
         let service = NgrokService.shared
@@ -110,24 +110,25 @@ struct NgrokServiceTests {
         #expect(status == nil)
     }
 
-    @Test("NgrokError descriptions")
-    func ngrokErrorDescriptions() {
+    @Test
+    func ngrokerrorDescriptions() throws {
         let errors: [NgrokError] = [
             .notInstalled,
             .authTokenMissing,
             .tunnelCreationFailed("test error"),
             .invalidConfiguration,
-            .networkError("connection failed")
+            .networkError("connection failed"),
         ]
 
         for error in errors {
             #expect(error.errorDescription != nil)
-            #expect(!error.errorDescription!.isEmpty)
+            let description = try #require(error.errorDescription)
+            #expect(!description.isEmpty)
         }
     }
 
-    @Test("NgrokError equality")
-    func ngrokErrorEquality() {
+    @Test
+    func ngrokerrorEquality() {
         #expect(NgrokError.notInstalled == NgrokError.notInstalled)
         #expect(NgrokError.authTokenMissing == NgrokError.authTokenMissing)
         #expect(NgrokError.tunnelCreationFailed("a") == NgrokError.tunnelCreationFailed("a"))

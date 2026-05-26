@@ -24,7 +24,7 @@ struct LoggerTests {
 
     @Test("Logger initialization")
     func loggerInit() {
-        let logger = Logger(category: "TestCategory")
+        _ = Logger(category: "TestCategory")
 
         // Unfortunately we can't access the private category property
         // but we can verify the logger was created without error
@@ -83,6 +83,29 @@ struct LoggerTests {
         #expect(true)
     }
 
+    @Test("Logger avoids evaluating filtered messages")
+    func loggerLazyMessages() {
+        let logger = Logger(category: "Test")
+        let originalLogLevel = Logger.globalLevel
+        defer {
+            Logger.globalLevel = originalLogLevel
+        }
+
+        var didEvaluate = false
+        func makeMessage() -> String {
+            didEvaluate = true
+            return "Lazy message"
+        }
+
+        Logger.globalLevel = .error
+        logger.debug(makeMessage())
+        #expect(didEvaluate == false)
+
+        Logger.globalLevel = .verbose
+        logger.debug(makeMessage())
+        #expect(didEvaluate == true)
+    }
+
     @Test("Default log level based on build configuration")
     func defaultLogLevel() {
         // Reset to see what the default is
@@ -91,7 +114,7 @@ struct LoggerTests {
         // Note: This test might not work as expected because the static var
         // is already initialized by the time tests run
         #else
-            // In release builds, default should be .warning
+        // In release builds, default should be .warning
         #endif
 
         // Just verify we can read the global level

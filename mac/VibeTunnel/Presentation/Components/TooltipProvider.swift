@@ -18,8 +18,7 @@ enum TooltipProvider {
         serverManager: ServerManager,
         ngrokService: NgrokService,
         tailscaleService: TailscaleService,
-        sessionMonitor: SessionMonitor
-    )
+        sessionMonitor: SessionMonitor)
         -> String
     {
         var tooltipParts: [String] = []
@@ -52,20 +51,14 @@ enum TooltipProvider {
         // Session info
         let sessions = sessionMonitor.sessions.values.filter(\.isRunning)
         if !sessions.isEmpty {
-            let activeSessions = sessions.filter { session in
-                if let activityStatus = session.activityStatus?.specificStatus?.status {
-                    return !activityStatus.isEmpty
-                }
-                return false
-            }
+            let activeSessions = sessions.filter(\.isActivityActive)
 
             let idleCount = sessions.count - activeSessions.count
             if !activeSessions.isEmpty {
                 if idleCount > 0 {
                     tooltipParts
                         .append(
-                            "\(activeSessions.count) active, \(idleCount) idle session\(sessions.count == 1 ? "" : "s")"
-                        )
+                            "\(activeSessions.count) active, \(idleCount) idle session\(sessions.count == 1 ? "" : "s")")
                 } else {
                     tooltipParts.append("\(activeSessions.count) active session\(activeSessions.count == 1 ? "" : "s")")
                 }

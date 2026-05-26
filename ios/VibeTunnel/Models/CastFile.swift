@@ -85,22 +85,22 @@ class CastRecorder {
     /// Clears any previous events and sets the recording start time.
     /// Has no effect if recording is already in progress.
     func startRecording() {
-        guard !isRecording else { return }
+        guard !self.isRecording else { return }
 
-        isRecording = true
-        recordingStartTime = Date()
-        startTime = Date().timeIntervalSince1970
-        events.removeAll()
+        self.isRecording = true
+        self.recordingStartTime = Date()
+        self.startTime = Date().timeIntervalSince1970
+        self.events.removeAll()
     }
 
     /// Stops recording terminal events.
     ///
     /// Has no effect if recording is not in progress.
     func stopRecording() {
-        guard isRecording else { return }
+        guard self.isRecording else { return }
 
-        isRecording = false
-        recordingStartTime = nil
+        self.isRecording = false
+        self.recordingStartTime = nil
     }
 
     /// Records terminal output data.
@@ -110,18 +110,17 @@ class CastRecorder {
     /// Output events are timestamped relative to the recording start time.
     /// Has no effect if recording is not active.
     func recordOutput(_ data: String) {
-        guard isRecording else { return }
+        guard self.isRecording else { return }
 
         let currentTime = Date().timeIntervalSince1970
-        let relativeTime = currentTime - startTime
+        let relativeTime = currentTime - self.startTime
 
         let event = CastEvent(
             time: relativeTime,
             type: "o", // output
-            data: data
-        )
+            data: data)
 
-        events.append(event)
+        self.events.append(event)
     }
 
     /// Records a terminal resize event.
@@ -133,19 +132,18 @@ class CastRecorder {
     /// Resize events are timestamped relative to the recording start time.
     /// Has no effect if recording is not active.
     func recordResize(cols: Int, rows: Int) {
-        guard isRecording else { return }
+        guard self.isRecording else { return }
 
         let currentTime = Date().timeIntervalSince1970
-        let relativeTime = currentTime - startTime
+        let relativeTime = currentTime - self.startTime
 
         let resizeData = "\(cols)x\(rows)"
         let event = CastEvent(
             time: relativeTime,
             type: "r", // resize
-            data: resizeData
-        )
+            data: resizeData)
 
-        events.append(event)
+        self.events.append(event)
     }
 
     /// Exports the recording as an Asciinema cast v2 file.
@@ -163,8 +161,7 @@ class CastRecorder {
             timestamp: startTime,
             title: "VibeTunnel Recording - \(sessionId)",
             env: ["TERM": "xterm-256color", "SHELL": "/bin/zsh"],
-            theme: nil
-        )
+            theme: nil)
 
         guard let headerData = try? JSONEncoder().encode(header),
               let headerString = String(data: headerData, encoding: .utf8)
@@ -176,11 +173,15 @@ class CastRecorder {
         var castContent = headerString + "\n"
 
         // Add all events
-        for event in events {
+        for event in self.events {
             // Cast events are encoded as arrays [time, type, data]
-            let eventArray: [Any] = [event.time, event.type, event.data]
+            let eventArray: [JSONValue] = [
+                .number(event.time),
+                .string(event.type),
+                .string(event.data),
+            ]
 
-            if let jsonData = try? JSONSerialization.data(withJSONObject: eventArray),
+            if let jsonData = try? JSONEncoder().encode(eventArray),
                let jsonString = String(data: jsonData, encoding: .utf8)
             {
                 castContent += jsonString + "\n"
@@ -242,11 +243,11 @@ class CastPlayer {
             let line = lines[index].trimmingCharacters(in: .whitespacesAndNewlines)
             guard !line.isEmpty,
                   let lineData = line.data(using: .utf8),
-                  let array = try? JSONSerialization.jsonObject(with: lineData) as? [Any],
+                  let array = JSONValue.decodeArray(from: lineData),
                   array.count >= 3,
-                  let time = array[0] as? Double,
-                  let type = array[1] as? String,
-                  let data = array[2] as? String
+                  let time = array[0].double,
+                  let type = array[1].string,
+                  let data = array[2].string
             else {
                 continue
             }
@@ -263,7 +264,7 @@ class CastPlayer {
     ///
     /// Calculated from the timestamp of the last event.
     var duration: TimeInterval {
-        events.last?.time ?? 0
+        self.events.last?.time ?? 0
     }
 
     /// Plays back the recording with proper timing.
@@ -303,7 +304,7 @@ class CastPlayer {
     /// their original timing.
     @MainActor
     func play(onEvent: @Sendable (CastEvent) async -> Void) async throws {
-        for event in events {
+        for event in self.events {
             // Check for cancellation
             try Task.checkCancellation()
 

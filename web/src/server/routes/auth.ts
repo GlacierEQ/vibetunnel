@@ -10,6 +10,28 @@ interface AuthRoutesConfig {
   noAuth?: boolean;
 }
 
+function isFromLocalhost(req: AuthenticatedRequest): boolean {
+  const remoteAddr = req.socket.remoteAddress;
+  return remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1';
+}
+
+function hasProxyHeaders(req: AuthenticatedRequest): boolean {
+  return Boolean(
+    req.headers['x-forwarded-proto'] &&
+      req.headers['x-forwarded-for'] &&
+      req.headers['x-forwarded-host']
+  );
+}
+
+function getHeaderValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function getTailscaleLogin(req: AuthenticatedRequest): string | undefined {
+  return getHeaderValue(req.headers['tailscale-user-login']);
+}
+
 export function createAuthRoutes(config: AuthRoutesConfig): Router {
   const router = Router();
   const { authService } = config;
@@ -128,7 +150,7 @@ export function createAuthRoutes(config: AuthRoutesConfig): Router {
     try {
       const authHeader = req.headers.authorization;
 
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      if (!authHeader?.startsWith('Bearer ')) {
         return res.status(401).json({ valid: false, error: 'No token provided' });
       }
 
@@ -198,6 +220,62 @@ export function createAuthRoutes(config: AuthRoutesConfig): Router {
     } catch (error) {
       console.error('Error getting auth config:', error);
       res.status(500).json({ error: 'Failed to get auth config' });
+    }
+  });
+
+  /**
+   * Get JWT token for Tailscale authenticated users (for WebSocket auth)
+   * POST /api/auth/tailscale-token
+   */
+  router.post('/tailscale-token', (req: AuthenticatedRequest, res) => {
+    try {
+      // Only allow Tailscale-authenticated users to get tokens
+      if (req.authMethod !== 'tailscale') {
+        return res.status(401).json({
+          error: 'This endpoint is only available for Tailscale authenticated users',
+        });
+      }
+
+      if (!req.userId) {
+        return res.status(401).json({
+          error: 'No user ID found in Tailscale authentication',
+        });
+      }
+
+      // Validate that the request is actually coming from the local Tailscale proxy
+      if (!isFromLocalhost(req)) {
+        return res.status(401).json({
+          error: 'Invalid request origin',
+        });
+      }
+
+      if (!hasProxyHeaders(req)) {
+        return res.status(401).json({
+          error: 'Invalid proxy configuration',
+        });
+      }
+
+      const tailscaleLogin = getTailscaleLogin(req);
+      if (!tailscaleLogin || tailscaleLogin !== req.userId) {
+        return res.status(401).json({
+          error: 'Invalid Tailscale identity headers',
+        });
+      }
+
+      // Generate a JWT token for WebSocket authentication
+      // Use the private generateToken method via a wrapper in AuthService
+      const token = authService.generateTokenForUser(req.userId);
+
+      res.json({
+        success: true,
+        token,
+        userId: req.userId,
+        authMethod: 'tailscale',
+        expiresIn: '24h',
+      });
+    } catch (error) {
+      console.error('Error generating Tailscale token:', error);
+      res.status(500).json({ error: 'Failed to generate token' });
     }
   });
 

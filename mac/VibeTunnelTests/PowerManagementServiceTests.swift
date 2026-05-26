@@ -9,8 +9,8 @@ struct PowerManagementServiceTests {
     // Since PowerManagementService has a private init, we can only test through the shared instance
     // We need to ensure proper cleanup between tests
 
-    @Test("Sleep prevention defaults to true when key doesn't exist")
-    func sleepPreventionDefaultValue() async {
+    @Test
+    func sleepPreventionDefaultsToTrueWhenKeyDoesnTExist() {
         // Save current value
         let currentValue = UserDefaults.standard.object(forKey: AppConstants.UserDefaultsKeys.preventSleepWhenRunning)
         defer {
@@ -34,8 +34,8 @@ struct PowerManagementServiceTests {
         #expect(standardDefault == false, "UserDefaults.standard.bool returns false for non-existent keys")
     }
 
-    @Test("Update sleep prevention logic with all combinations")
-    func updateSleepPreventionLogic() async {
+    @Test
+    func updateSleepPreventionLogicWithAllCombinations() {
         let service = PowerManagementService.shared
 
         // Ensure clean state
@@ -61,8 +61,8 @@ struct PowerManagementServiceTests {
         service.allowSleep()
     }
 
-    @Test("Multiple prevent sleep calls are idempotent")
-    func preventSleepIdempotency() async {
+    @Test
+    func multiplePreventSleepCallsAreIdempotent() {
         let service = PowerManagementService.shared
 
         // Ensure clean state
@@ -82,8 +82,8 @@ struct PowerManagementServiceTests {
         service.allowSleep()
     }
 
-    @Test("Multiple allow sleep calls are idempotent")
-    func allowSleepIdempotency() async {
+    @Test
+    func multipleAllowSleepCallsAreIdempotent() {
         let service = PowerManagementService.shared
 
         // Set up initial state
@@ -100,8 +100,8 @@ struct PowerManagementServiceTests {
         #expect(!service.isSleepPrevented)
     }
 
-    @Test("State transitions work correctly")
-    func stateTransitions() async {
+    @Test
+    func stateTransitionsWorkCorrectly() {
         let service = PowerManagementService.shared
 
         // Ensure clean state
@@ -133,8 +133,8 @@ struct PowerManagementServiceTests {
 @Suite("Power Management Edge Cases")
 @MainActor
 struct PowerManagementEdgeCaseTests {
-    @Test("Rapid state changes handle correctly")
-    func rapidStateChanges() async {
+    @Test
+    func rapidStateChangesHandleCorrectly() {
         let service = PowerManagementService.shared
 
         // Ensure clean state

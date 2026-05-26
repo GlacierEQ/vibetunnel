@@ -2,14 +2,13 @@
  * TerminalRenderer Component
  *
  * A pure presentational component that renders the terminal.
- * Handles binary vs text mode selection and terminal configuration.
+ * Renders the Ghostty-based terminal and wires events upward.
  */
 import { html, LitElement } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import type { Session } from '../../../shared/types.js';
 import type { TerminalThemeId } from '../../utils/terminal-themes.js';
 import '../terminal.js';
-import '../vibe-terminal-binary.js';
 
 @customElement('terminal-renderer')
 export class TerminalRenderer extends LitElement {
@@ -28,12 +27,13 @@ export class TerminalRenderer extends LitElement {
   }
 
   @property({ type: Object }) session: Session | null = null;
-  @property({ type: Boolean }) useBinaryMode = false;
   @property({ type: Number }) terminalFontSize = 14;
   @property({ type: Number }) terminalMaxCols = 0;
   @property({ type: String }) terminalTheme: TerminalThemeId = 'auto';
   @property({ type: Boolean }) disableClick = false;
   @property({ type: Boolean }) hideScrollButton = false;
+  @property({ type: Boolean }) isMobile = false;
+  @property({ type: Boolean }) showQuickKeys = false;
 
   // Event handlers passed as properties
   @property({ type: Object }) onTerminalClick?: (e: Event) => void;
@@ -46,51 +46,27 @@ export class TerminalRenderer extends LitElement {
       return html``;
     }
 
-    if (this.useBinaryMode) {
-      return html`
-        <vibe-terminal-binary
-          .sessionId=${this.session.id || ''}
-          .sessionStatus=${this.session.status || 'running'}
-          .cols=${80}
-          .rows=${24}
-          .fontSize=${this.terminalFontSize}
-          .fitHorizontally=${false}
-          .maxCols=${this.terminalMaxCols}
-          .theme=${this.terminalTheme}
-          .initialCols=${this.session.initialCols || 0}
-          .initialRows=${this.session.initialRows || 0}
-          .disableClick=${this.disableClick}
-          .hideScrollButton=${this.hideScrollButton}
-          class="w-full h-full p-0 m-0 terminal-container"
-          @click=${(e: Event) => this.handleClick(e)}
-          @terminal-input=${(e: Event) => this.handleTerminalInput(e)}
-          @terminal-resize=${(e: Event) => this.handleTerminalResize(e)}
-          @terminal-ready=${(e: Event) => this.handleTerminalReady(e)}
-        ></vibe-terminal-binary>
-      `;
-    } else {
-      return html`
-        <vibe-terminal
-          .sessionId=${this.session.id || ''}
-          .sessionStatus=${this.session.status || 'running'}
-          .cols=${80}
-          .rows=${24}
-          .fontSize=${this.terminalFontSize}
-          .fitHorizontally=${false}
-          .maxCols=${this.terminalMaxCols}
-          .theme=${this.terminalTheme}
-          .initialCols=${this.session.initialCols || 0}
-          .initialRows=${this.session.initialRows || 0}
-          .disableClick=${this.disableClick}
-          .hideScrollButton=${this.hideScrollButton}
-          class="w-full h-full p-0 m-0 terminal-container"
-          @click=${(e: Event) => this.handleClick(e)}
-          @terminal-input=${(e: Event) => this.handleTerminalInput(e)}
-          @terminal-resize=${(e: Event) => this.handleTerminalResize(e)}
-          @terminal-ready=${(e: Event) => this.handleTerminalReady(e)}
-        ></vibe-terminal>
-      `;
-    }
+    return html`
+      <vibe-terminal
+        .sessionId=${this.session.id || ''}
+        .sessionStatus=${this.session.status || 'running'}
+        .cols=${80}
+        .rows=${24}
+        .fontSize=${this.terminalFontSize}
+        .fitHorizontally=${false}
+        .maxCols=${this.terminalMaxCols}
+        .theme=${this.terminalTheme}
+        .initialCols=${this.session.initialCols || 0}
+        .initialRows=${this.session.initialRows || 0}
+        .disableClick=${this.disableClick}
+        .hideScrollButton=${this.hideScrollButton}
+        class="w-full h-full p-0 m-0 terminal-container"
+        @click=${(e: Event) => this.handleClick(e)}
+        @terminal-input=${(e: Event) => this.handleTerminalInput(e)}
+        @terminal-resize=${(e: Event) => this.handleTerminalResize(e)}
+        @terminal-ready=${(e: Event) => this.handleTerminalReady(e)}
+      ></vibe-terminal>
+    `;
   }
 
   private handleClick(e: Event) {

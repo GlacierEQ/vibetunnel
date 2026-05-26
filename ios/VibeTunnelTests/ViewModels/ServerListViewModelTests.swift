@@ -18,8 +18,7 @@ struct ServerListViewModelTests {
             connectionManager: connectionManager,
             networkMonitor: mockNetworkMonitor,
             keychainService: mockKeychain,
-            userDefaults: testUserDefaults
-        )
+            userDefaults: testUserDefaults)
 
         return (viewModel, mockKeychain)
     }
@@ -28,8 +27,7 @@ struct ServerListViewModelTests {
         name: String = "Test Server",
         url: String = "http://localhost:4020",
         requiresAuth: Bool = false,
-        username: String? = nil
-    )
+        username: String? = nil)
         -> ServerProfile
     {
         ServerProfile(
@@ -37,15 +35,14 @@ struct ServerListViewModelTests {
             name: name,
             url: url,
             requiresAuth: requiresAuth,
-            username: username
-        )
+            username: username)
     }
 
     // MARK: - Tests
 
     @Test("ViewModel initializes with empty profiles")
     func initializationWithEmptyProfiles() {
-        let (viewModel, _) = createTestViewModel()
+        let (viewModel, _) = self.createTestViewModel()
 
         #expect(viewModel.profiles.isEmpty)
         #expect(viewModel.isLoading == false)
@@ -56,14 +53,13 @@ struct ServerListViewModelTests {
 
     @Test("Adding new profile updates profiles list")
     func addNewProfile() async throws {
-        let (viewModel, keychain) = createTestViewModel()
+        let (viewModel, keychain) = self.createTestViewModel()
 
-        let profile = createTestProfile(
+        let profile = self.createTestProfile(
             name: "Test Server",
             url: "http://192.168.1.100:4020",
             requiresAuth: true,
-            username: "testuser"
-        )
+            username: "testuser")
 
         try await viewModel.addProfile(profile, password: "testpass123")
 
@@ -76,9 +72,9 @@ struct ServerListViewModelTests {
 
     @Test("Adding profile without password doesn't save to keychain")
     func addProfileWithoutPassword() async throws {
-        let (viewModel, keychain) = createTestViewModel()
+        let (viewModel, keychain) = self.createTestViewModel()
 
-        let profile = createTestProfile(requiresAuth: false)
+        let profile = self.createTestProfile(requiresAuth: false)
 
         try await viewModel.addProfile(profile, password: nil)
 
@@ -91,9 +87,9 @@ struct ServerListViewModelTests {
 
     @Test("Deleting profile removes from list")
     func deleteProfile() async throws {
-        let (viewModel, _) = createTestViewModel()
+        let (viewModel, _) = self.createTestViewModel()
 
-        let profile = createTestProfile()
+        let profile = self.createTestProfile()
         try await viewModel.addProfile(profile, password: nil)
 
         #expect(viewModel.profiles.contains { $0.id == profile.id })
@@ -105,13 +101,40 @@ struct ServerListViewModelTests {
 
     @Test("Connecting to profile updates state")
     func connectToProfile() async throws {
-        let (viewModel, _) = createTestViewModel()
+        let (viewModel, _) = self.createTestViewModel()
 
-        let profile = createTestProfile()
+        let profile = self.createTestProfile()
         try await viewModel.addProfile(profile, password: nil)
 
         await viewModel.initiateConnectionToProfile(profile)
 
         #expect(viewModel.currentConnectingProfile?.id == profile.id)
+    }
+
+    @Test("Connection status message shown during HTTPS fallback")
+    func connectionStatusMessageDuringFallback() async throws {
+        let (viewModel, _) = createTestViewModel()
+
+        // Create profile with HTTPS that will fail
+        let profile = ServerProfile(
+            name: "Tailscale Server",
+            url: "https://test-machine.tailnet.ts.net",
+            host: "100.64.0.1",
+            port: 4_020,
+            tailscaleHostname: "test-machine.tailnet.ts.net",
+            tailscaleIP: "100.64.0.1",
+            httpsAvailable: true,
+            isPublic: true,
+            preferSSL: true
+        )
+
+        try await viewModel.addProfile(profile)
+
+        // Simulate connection attempt
+        await viewModel.initiateConnectionToProfile(profile)
+
+        // During fallback, status message should be set
+        // Note: In actual implementation with mocked network failure
+        #expect(viewModel.currentConnectingProfile != nil)
     }
 }

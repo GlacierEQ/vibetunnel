@@ -27,6 +27,8 @@ import './session-card.js';
 import './inline-edit.js';
 import './session-list/compact-session-card.js';
 import './session-list/repository-header.js';
+import './clickable-path.js';
+import './git-status-badge.js';
 import { getBaseRepoName } from '../../shared/utils/git.js';
 import { Z_INDEX } from '../utils/constants.js';
 import { createLogger } from '../utils/logger.js';
@@ -47,6 +49,7 @@ export class SessionList extends LitElement {
   @property({ type: Object }) authClient!: AuthClient;
   @property({ type: String }) selectedSessionId: string | null = null;
   @property({ type: Boolean }) compactMode = false;
+  @property({ type: String }) activeSessionId: string | null = null;
 
   @state() private cleaningExited = false;
   @state() private repoFollowMode = new Map<string, string | undefined>();
@@ -114,7 +117,7 @@ export class SessionList extends LitElement {
   };
 
   private getVisibleSessions() {
-    const running = this.sessions.filter((s) => s.status === 'running');
+    const running = this.sessions.filter((s) => s.status === 'running' || s.status === 'starting');
     const exited = this.sessions.filter((s) => s.status === 'exited');
     return this.hideExited ? running : running.concat(exited);
   }
@@ -347,7 +350,15 @@ export class SessionList extends LitElement {
 
     sessions.forEach((session) => {
       // Use gitMainRepoPath to group worktrees with their main repository
-      const groupKey = session.gitMainRepoPath || session.gitRepoPath || null;
+      const mainRepo =
+        typeof session.gitMainRepoPath === 'string' && session.gitMainRepoPath.length > 0
+          ? session.gitMainRepoPath
+          : null;
+      const repo =
+        typeof session.gitRepoPath === 'string' && session.gitRepoPath.length > 0
+          ? session.gitRepoPath
+          : null;
+      const groupKey = mainRepo || repo || null;
       if (!groups.has(groupKey)) {
         groups.set(groupKey, []);
       }
@@ -369,7 +380,9 @@ export class SessionList extends LitElement {
     }
 
     // Add git sessions sorted by repo name
-    const gitRepos = Array.from(groups.keys()).filter((key): key is string => key !== null);
+    const gitRepos = Array.from(groups.keys()).filter(
+      (key): key is string => typeof key === 'string' && key.length > 0
+    );
     gitRepos.sort((a, b) => {
       const nameA = this.getRepoName(a);
       const nameB = this.getRepoName(b);
@@ -728,28 +741,25 @@ export class SessionList extends LitElement {
   }
 
   render() {
-    // Group sessions by status and activity
-    const activeSessions = this.sessions.filter(
-      (session) => session.status === 'running' && session.activityStatus?.isActive !== false
-    );
-    const idleSessions = this.sessions.filter(
-      (session) => session.status === 'running' && session.activityStatus?.isActive === false
+    // Group sessions by status
+    const runningSessions = this.sessions.filter(
+      (session) => session.status === 'running' || session.status === 'starting'
     );
     const exitedSessions = this.sessions.filter((session) => session.status === 'exited');
 
-    const hasActiveSessions = activeSessions.length > 0;
-    const hasIdleSessions = idleSessions.length > 0;
+    const hasRunningSessions = runningSessions.length > 0;
     const hasExitedSessions = exitedSessions.length > 0;
-    const showExitedSection = !this.hideExited && (hasIdleSessions || hasExitedSessions);
+    const showExitedSection = !this.hideExited && hasExitedSessions;
 
     // Track session index for numbering
     let sessionIndex = 0;
 
     return html`
       <div class="font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent-primary focus:ring-offset-2 focus:ring-offset-bg-primary rounded-lg" data-testid="session-list-container">
+        ${this.renderActiveSessionInfo()}
         <div class="p-4 pt-5">
         ${
-          !hasActiveSessions && !hasIdleSessions && (!hasExitedSessions || this.hideExited)
+          !hasRunningSessions && (!hasExitedSessions || this.hideExited)
             ? html`
               <div class="text-text-muted text-center py-8">
                 ${
@@ -823,15 +833,15 @@ export class SessionList extends LitElement {
               </div>
             `
             : html`
-              <!-- Active Sessions -->
+              <!-- Running Sessions -->
               ${
-                hasActiveSessions
+                hasRunningSessions
                   ? html`
                     <div class="mb-6 mt-2">
                       <h3 class="text-xs font-semibold text-text-muted uppercase tracking-wider mb-4">
-                        Active <span class="text-text-dim">(${activeSessions.length})</span>
+                        Running <span class="text-text-dim">(${runningSessions.length})</span>
                       </h3>
-                      ${Array.from(this.groupSessionsByRepo(activeSessions)).map(
+                      ${Array.from(this.groupSessionsByRepo(runningSessions)).map(
                         ([repoPath, repoSessions]) => html`
                           <div class="${repoPath ? 'mb-6 mt-6' : 'mb-4'}">
                             ${
@@ -840,8 +850,8 @@ export class SessionList extends LitElement {
                                   <repository-header
                                     .repoPath=${repoPath}
                                     .followMode=${this.repoFollowMode.get(repoPath)}
-                                    .followModeSelector=${this.renderFollowModeSelector(repoPath, 'active')}
-                                    .worktreeSelector=${this.renderWorktreeSelector(repoPath, 'active')}
+                                    .followModeSelector=${this.renderFollowModeSelector(repoPath, 'running')}
+                                    .worktreeSelector=${this.renderWorktreeSelector(repoPath, 'running')}
                                   ></repository-header>
                                 `
                                 : ''
@@ -860,7 +870,7 @@ export class SessionList extends LitElement {
                             .session=${session}
                             .authClient=${this.authClient}
                             .selected=${session.id === this.selectedSessionId}
-                            .sessionType=${'active'}
+                            .sessionType=${'running'}
                             .sessionNumber=${currentIndex}
                             @session-select=${this.handleSessionSelect}
                             @session-rename=${this.handleSessionRenamed}
@@ -894,82 +904,11 @@ export class SessionList extends LitElement {
                   : ''
               }
               
-              <!-- Idle Sessions -->
-              ${
-                hasIdleSessions
-                  ? html`
-                    <div class="mb-6 ${!hasActiveSessions ? 'mt-2' : ''}">
-                      <h3 class="text-xs font-semibold text-text-muted uppercase tracking-wider mb-4">
-                        Idle <span class="text-text-dim">(${idleSessions.length})</span>
-                      </h3>
-                      ${Array.from(this.groupSessionsByRepo(idleSessions)).map(
-                        ([repoPath, repoSessions]) => html`
-                          <div class="${repoPath ? 'mb-6 mt-6' : 'mb-4'}">
-                            ${
-                              repoPath
-                                ? html`
-                                  <repository-header
-                                    .repoPath=${repoPath}
-                                    .followMode=${this.repoFollowMode.get(repoPath)}
-                                    .followModeSelector=${this.renderFollowModeSelector(repoPath, 'idle')}
-                                    .worktreeSelector=${this.renderWorktreeSelector(repoPath, 'idle')}
-                                  ></repository-header>
-                                `
-                                : ''
-                            }
-                            <div class="${this.compactMode ? '' : 'session-flex-responsive'} relative">
-                              ${repeat(
-                                repoSessions,
-                                (session) => session.id,
-                                (session) => {
-                                  const currentIndex = ++sessionIndex;
-                                  return html`
-                            ${
-                              this.compactMode
-                                ? html`
-                                  <compact-session-card
-                                    .session=${session}
-                                    .authClient=${this.authClient}
-                                    .selected=${session.id === this.selectedSessionId}
-                                    .sessionType=${'idle'}
-                                    .sessionNumber=${currentIndex}
-                                    @session-select=${this.handleSessionSelect}
-                                    @session-rename=${this.handleSessionRenamed}
-                                    @session-delete=${this.handleSessionKilled}
-                                  ></compact-session-card>
-                                `
-                                : html`
-                                  <!-- Full session card for main view -->
-                                  <session-card
-                                    .session=${session}
-                                    .authClient=${this.authClient}
-                                    .selected=${session.id === this.selectedSessionId}
-                                    @session-select=${this.handleSessionSelect}
-                                    @session-killed=${this.handleSessionKilled}
-                                    @session-kill-error=${this.handleSessionKillError}
-                                    @session-renamed=${this.handleSessionRenamed}
-                                    @session-rename-error=${this.handleSessionRenameError}
-                                          >
-                                  </session-card>
-                                `
-                            }
-                          `;
-                                }
-                              )}
-                            </div>
-                          </div>
-                        `
-                      )}
-                    </div>
-                  `
-                  : ''
-              }
-              
               <!-- Exited Sessions -->
               ${
                 showExitedSection && hasExitedSessions
                   ? html`
-                    <div class="${!hasActiveSessions && !hasIdleSessions ? 'mt-2' : ''}">
+                    <div class="${!hasRunningSessions ? 'mt-2' : ''}">
                       <h3 class="text-xs font-semibold text-text-muted uppercase tracking-wider mb-4">
                         Exited <span class="text-text-dim">(${exitedSessions.length})</span>
                       </h3>
@@ -1046,8 +985,6 @@ export class SessionList extends LitElement {
   private renderExitedControls() {
     const exitedSessions = this.sessions.filter((session) => session.status === 'exited');
     const runningSessions = this.sessions.filter((session) => session.status === 'running');
-    const activeSessions = runningSessions.filter((s) => s.activityStatus?.isActive !== false);
-    const idleSessions = runningSessions.filter((s) => s.activityStatus?.isActive === false);
 
     // If no sessions at all, don't show controls
     if (this.sessions.length === 0) return '';
@@ -1060,16 +997,9 @@ export class SessionList extends LitElement {
             <!-- Session counts -->
             <div class="flex items-center gap-2 sm:gap-3 font-mono text-xs">
               ${
-                activeSessions.length > 0
+                runningSessions.length > 0
                   ? html`
-                <span class="text-status-success whitespace-nowrap">${activeSessions.length} Active</span>
-              `
-                  : ''
-              }
-              ${
-                idleSessions.length > 0
-                  ? html`
-                <span class="text-text-muted whitespace-nowrap">${idleSessions.length} Idle</span>
+                <span class="text-status-success whitespace-nowrap">${runningSessions.length} Running</span>
               `
                   : ''
               }
@@ -1151,6 +1081,77 @@ export class SessionList extends LitElement {
                 : ''
             }
           </div>
+        </div>
+      </div>
+    `;
+  }
+
+  private renderActiveSessionInfo() {
+    // Only show in compact mode (mobile sidebar) when there's an active session
+    if (!this.compactMode || !this.activeSessionId) {
+      return '';
+    }
+
+    const activeSession = this.sessions.find((s) => s.id === this.activeSessionId);
+    if (!activeSession) {
+      return '';
+    }
+
+    return html`
+      <div class="mb-4 mx-4 p-3 bg-primary/10 border border-primary/30 rounded-lg">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold text-primary uppercase tracking-wider">Active Session</span>
+          <div class="flex items-center gap-2">
+            <div class="relative">
+              <div class="w-2 h-2 rounded-full bg-status-success"></div>
+              ${
+                activeSession.status === 'running'
+                  ? html`
+                <div class="absolute inset-0 w-2 h-2 rounded-full bg-status-success animate-ping opacity-50"></div>
+              `
+                  : ''
+              }
+            </div>
+          </div>
+        </div>
+        
+        <!-- Session Title -->
+        <div class="mb-2">
+          <inline-edit
+            .value=${activeSession.name}
+            .entityId=${activeSession.id}
+            .entityType=${'session'}
+            .authClient=${this.authClient}
+            @value-changed=${(e: CustomEvent) => {
+              // Update the session name in the list
+              const updatedSession = this.sessions.find((s) => s.id === activeSession.id);
+              if (updatedSession) {
+                updatedSession.name = e.detail.value;
+                this.requestUpdate();
+              }
+            }}
+            class="text-sm font-medium text-text"
+          ></inline-edit>
+        </div>
+        
+        <!-- Path and Git Status -->
+        <div class="space-y-1">
+          <clickable-path
+            .path=${activeSession.workingDir}
+            .format=${'relative'}
+            class="text-xs text-text-muted"
+          ></clickable-path>
+          
+          ${
+            activeSession.gitRepoPath
+              ? html`
+            <git-status-badge
+              .session=${activeSession}
+              class="text-xs"
+            ></git-status-badge>
+          `
+              : ''
+          }
         </div>
       </div>
     `;

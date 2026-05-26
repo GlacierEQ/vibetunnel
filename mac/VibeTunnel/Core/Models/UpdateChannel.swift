@@ -51,8 +51,7 @@ public enum UpdateChannel: String, CaseIterable, Codable, Sendable {
     private static let prereleaseAppcastURL: URL = {
         guard let url =
             URL(
-                string: "https://stats.store/api/v1/appcast/appcast-prerelease.xml"
-            )
+                string: "https://stats.store/api/v1/appcast/appcast-prerelease.xml")
         else {
             fatalError("Invalid prerelease appcast URL - this should never happen with a hardcoded URL")
         }
@@ -109,7 +108,9 @@ public enum UpdateChannel: String, CaseIterable, Codable, Sendable {
 // MARK: - Identifiable Conformance
 
 extension UpdateChannel: Identifiable {
-    public var id: String { rawValue }
+    public var id: String {
+        rawValue
+    }
 }
 
 // MARK: - UserDefaults Integration

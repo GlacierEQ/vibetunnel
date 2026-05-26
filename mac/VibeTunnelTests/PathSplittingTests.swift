@@ -3,8 +3,8 @@ import Testing
 
 @Suite("Path Splitting Tests")
 struct PathSplittingTests {
-    @Test("Path expansion with tilde")
-    func pathExpansion() {
+    @Test
+    func pathExpansionWithTilde() {
         // Test 1: Expanding "~/Pr"
         let shortPath = "~/Pr"
         let expandedPath = NSString(string: shortPath).expandingTildeInPath
@@ -15,8 +15,8 @@ struct PathSplittingTests {
         #expect(expandedPath == "\(NSHomeDirectory())/Pr")
     }
 
-    @Test("URL handling of non-existent paths")
-    func urlWithNonExistentPath() {
+    @Test
+    func urlHandlingOfNonExistentPaths() {
         // Test 2: How URL handles non-existent paths
         let nonExistentPath = NSString(string: "~/Pr").expandingTildeInPath
         let url = URL(fileURLWithPath: nonExistentPath)
@@ -30,13 +30,13 @@ struct PathSplittingTests {
         #expect(!exists)
     }
 
-    @Test("Path components extraction", arguments: [
+    @Test(arguments: [
         "~/Pr",
         "/Users/steipete/Pr",
         "/Users/steipete/Projects",
         "/Users/steipete/Projects/vibetunnel"
     ])
-    func pathComponents(path: String) {
+    func pathComponentsExtraction(path: String) {
         // Test 3: deletingLastPathComponent and lastPathComponent
         let url = URL(fileURLWithPath: path.starts(with: "~") ? NSString(string: path).expandingTildeInPath : path)
         let parent = url.deletingLastPathComponent()
@@ -47,8 +47,8 @@ struct PathSplittingTests {
         #expect(parent.path.count <= url.path.count)
     }
 
-    @Test("Special path cases")
-    func specialCases() {
+    @Test
+    func specialPathCases() {
         // Test with trailing slash
         let pathWithSlash = "~/Pr/"
         let expandedWithSlash = NSString(string: pathWithSlash).expandingTildeInPath
@@ -59,8 +59,8 @@ struct PathSplittingTests {
         // Test root directory
         let rootUrl = URL(fileURLWithPath: "/")
         #expect(rootUrl.path == "/")
-        // Root URL's parent is "/.." on macOS
-        #expect(rootUrl.deletingLastPathComponent().path == "/..")
+        // Root URL's parent has differed across Foundation versions (/ or /..)
+        #expect(["/", "/.."].contains(rootUrl.deletingLastPathComponent().path))
         // Root URL's last component is "/" on macOS
         #expect(rootUrl.lastPathComponent == "/")
 
@@ -71,7 +71,7 @@ struct PathSplittingTests {
         #expect(singleComponent.lastPathComponent == "Users")
     }
 
-    @Test("Autocomplete scenario")
+    @Test
     func autocompleteScenario() throws {
         // Test the actual autocomplete scenario
         let input = "~/Pr"
@@ -87,8 +87,7 @@ struct PathSplittingTests {
         let fileManager = FileManager.default
         let contents = try #require(try? fileManager.contentsOfDirectory(
             at: parentURL,
-            includingPropertiesForKeys: nil
-        ))
+            includingPropertiesForKeys: nil))
 
         let matching = contents.filter { $0.lastPathComponent.hasPrefix(prefix) }
         // We can't assert specific matches as they depend on the user's home directory

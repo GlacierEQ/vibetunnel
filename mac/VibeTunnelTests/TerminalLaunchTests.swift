@@ -9,15 +9,15 @@ import Testing
 struct TerminalLaunchTests {
     // MARK: - URL Generation Tests
 
-    @Test("Terminal URL generation", arguments: [
+    @Test(arguments: [
         (Terminal.iTerm2, "echo 'Hello World'", "iterm2://run?command=echo%20\'Hello%20World\'"),
         (Terminal.iTerm2, "cd /tmp && ls", "iterm2://run?command=cd%20/tmp%20%26%26%20ls"),
         (Terminal.terminal, "echo test", nil),
         (Terminal.alacritty, "echo test", nil),
         (Terminal.hyper, "echo test", nil),
-        (Terminal.wezterm, "echo test", nil)
+        (Terminal.wezterm, "echo test", nil),
     ])
-    func terminalURLGeneration(terminal: Terminal, command: String, expectedURL: String?) {
+    func terminalUrlGeneration(terminal: Terminal, command: String, expectedURL: String?) {
         if let url = terminal.commandURL(for: command) {
             #expect(url.absoluteString == expectedURL)
         } else {
@@ -27,8 +27,8 @@ struct TerminalLaunchTests {
 
     // MARK: - Command Arguments Tests
 
-    @Test("Command argument generation for terminals")
-    func commandArgumentGeneration() {
+    @Test
+    func commandArgumentGenerationForTerminals() {
         let command = "echo 'Hello World'"
 
         // Test Alacritty arguments
@@ -46,7 +46,7 @@ struct TerminalLaunchTests {
 
     // MARK: - Working Directory Tests
 
-    @Test("Working directory support")
+    @Test
     func workingDirectorySupport() {
         let workDir = "/Users/test/projects"
         let command = "ls -la"
@@ -54,21 +54,19 @@ struct TerminalLaunchTests {
         // Alacritty with working directory
         let alacrittyArgs = Terminal.alacritty.commandArguments(
             for: command,
-            workingDirectory: workDir
-        )
+            workingDirectory: workDir)
         #expect(alacrittyArgs == [
             "--working-directory", workDir,
-            "-e", "/bin/bash", "-c", command
+            "-e", "/bin/bash", "-c", command,
         ])
 
         // WezTerm with working directory
         let weztermArgs = Terminal.wezterm.commandArguments(
             for: command,
-            workingDirectory: workDir
-        )
+            workingDirectory: workDir)
         #expect(weztermArgs == [
             "start", "--cwd", workDir,
-            "--", "/bin/bash", "-c", command
+            "--", "/bin/bash", "-c", command,
         ])
 
         // iTerm2 URL with working directory
@@ -76,14 +74,13 @@ struct TerminalLaunchTests {
             #expect(url.absoluteString.contains("cd="))
             #expect(
                 url.absoluteString
-                    .contains(workDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
-            )
+                    .contains(workDir.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""))
         }
     }
 
     // MARK: - Complex Command Tests
 
-    @Test("Complex command encoding")
+    @Test
     func complexCommandEncoding() {
         let complexCommand = "git log --oneline -10 && echo 'Done!'"
 
@@ -101,7 +98,7 @@ struct TerminalLaunchTests {
 
     // MARK: - Terminal Detection Tests
 
-    @Test("Terminal detection")
+    @Test
     func terminalDetection() {
         // At least Terminal.app should be available on macOS
         #expect(Terminal.installed.contains(.terminal))
@@ -115,9 +112,9 @@ struct TerminalLaunchTests {
 
     // MARK: - Environment Variable Tests
 
-    @Test("Launching with environment variables")
+    @Test
     @MainActor
-    func environmentVariables() {
+    func launchingWithEnvironmentVariables() {
         _ = ["MY_VAR": "test_value", "PATH": "/custom/path:/usr/bin"]
         _ = "echo $MY_VAR"
 
@@ -131,7 +128,7 @@ struct TerminalLaunchTests {
 
     // MARK: - Script File Tests
 
-    @Test("Script file execution")
+    @Test
     func scriptFileExecution() throws {
         let tempDir = FileManager.default.temporaryDirectory
         let scriptPath = tempDir.appendingPathComponent("test_script.sh")
@@ -147,8 +144,7 @@ struct TerminalLaunchTests {
         // Make executable
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755],
-            ofItemAtPath: scriptPath.path
-        )
+            ofItemAtPath: scriptPath.path)
 
         // Test launching the script
         #expect(FileManager.default.fileExists(atPath: scriptPath.path))
@@ -192,7 +188,7 @@ extension Terminal {
         case .iTerm2:
             var components = URLComponents(string: "iterm2://run")
             var queryItems = [
-                URLQueryItem(name: "command", value: command)
+                URLQueryItem(name: "command", value: command),
             ]
             if let workDir = workingDirectory {
                 queryItems.append(URLQueryItem(name: "cd", value: workDir))

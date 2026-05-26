@@ -18,8 +18,6 @@ import { createAuthMiddleware } from './middleware/auth.js';
 import { PtyManager } from './pty/index.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { createConfigRoutes } from './routes/config.js';
-import { createControlRoutes } from './routes/control.js';
-import { createEventsRouter } from './routes/events.js';
 import { createFileRoutes } from './routes/files.js';
 import { createFilesystemRoutes } from './routes/filesystem.js';
 import { createGitRoutes } from './routes/git.js';
@@ -31,21 +29,22 @@ import { createRepositoryRoutes } from './routes/repositories.js';
 import { createSessionRoutes } from './routes/sessions.js';
 import { createTestNotificationRouter } from './routes/test-notification.js';
 import { createTmuxRoutes } from './routes/tmux.js';
-import { WebSocketInputHandler } from './routes/websocket-input.js';
 import { createWorktreeRoutes } from './routes/worktrees.js';
-import { ActivityMonitor } from './services/activity-monitor.js';
 import { AuthService } from './services/auth-service.js';
-import { BufferAggregator } from './services/buffer-aggregator.js';
+import { CastOutputHub } from './services/cast-output-hub.js';
+import { CloudflareService } from './services/cloudflare-service.js';
 import { ConfigService } from './services/config-service.js';
 import { ControlDirWatcher } from './services/control-dir-watcher.js';
+import { GitStatusHub } from './services/git-status-hub.js';
 import { HQClient } from './services/hq-client.js';
 import { mdnsService } from './services/mdns-service.js';
+import { NgrokService } from './services/ngrok-service.js';
 import { PushNotificationService } from './services/push-notification-service.js';
 import { RemoteRegistry } from './services/remote-registry.js';
 import { SessionMonitor } from './services/session-monitor.js';
-import { StreamWatcher } from './services/stream-watcher.js';
 import { tailscaleServeService } from './services/tailscale-serve-service.js';
 import { TerminalManager } from './services/terminal-manager.js';
+import { WsV3Hub } from './services/ws-v3-hub.js';
 import { closeLogger, createLogger, initLogger, setDebugMode } from './utils/logger.js';
 import { VapidManager } from './utils/vapid-manager.js';
 import { getVersionInfo, printVersionBanner } from './version.js';
@@ -58,6 +57,36 @@ interface WebSocketRequest extends http.IncomingMessage {
   userId?: string;
   authMethod?: string;
 }
+
+interface TailscaleConnectionInfo {
+  available: boolean;
+  isRunning: boolean;
+  httpsAvailable: boolean;
+  isPublic: boolean;
+  funnel: boolean;
+  mode: string;
+  hostname?: string;
+  httpsUrl?: string;
+}
+
+interface ConnectionInfo {
+  http: {
+    port: number | null;
+    url: string;
+  };
+  port: number | null;
+  tailscale?: TailscaleConnectionInfo;
+  sslAvailable?: boolean;
+  isPublic?: boolean;
+  tailscaleUrl?: string;
+}
+
+interface GlobalTunnelState {
+  __ngrokService?: NgrokService;
+  __cloudflareService?: CloudflareService;
+}
+
+const globalTunnelState = global as typeof global & GlobalTunnelState;
 
 const logger = createLogger('server');
 
@@ -97,10 +126,19 @@ interface Config {
   localAuthToken: string | null;
   // Tailscale Serve integration (manages auth and proxy)
   enableTailscaleServe: boolean;
+  // Tailscale Funnel integration (public internet access)
+  enableTailscaleFunnel: boolean;
   // HQ auth bypass for testing
   noHqAuth: boolean;
   // mDNS advertisement
   enableMDNS: boolean;
+  // Ngrok tunnel configuration
+  enableNgrok: boolean;
+  ngrokAuthToken: string | null;
+  ngrokDomain: string | null;
+  ngrokRegion: string | null;
+  // Cloudflare tunnel configuration
+  enableCloudflare: boolean;
 }
 
 // Show help message
@@ -121,6 +159,7 @@ Options:
   --allow-local-bypass  Allow localhost connections to bypass authentication
   --local-auth-token <token>  Token for localhost authentication bypass
   --enable-tailscale-serve  Enable Tailscale Serve integration (auto-manages proxy and auth)
+  --enable-tailscale-funnel Enable Tailscale Funnel for public internet access (requires --enable-tailscale-serve)
   --debug               Enable debug logging
 
 Push Notification Options:
@@ -131,6 +170,13 @@ Push Notification Options:
 
 Network Discovery Options:
   --no-mdns             Disable mDNS/Bonjour advertisement (enabled by default)
+
+Tunnel Options:
+  --ngrok               Enable ngrok tunnel for remote access
+  --ngrok-auth <token>  Ngrok authentication token
+  --ngrok-domain <dom>  Custom ngrok domain (requires paid plan)
+  --ngrok-region <reg>  Ngrok region (us, eu, ap, au, sa, jp, in)
+  --cloudflare          Enable Cloudflare tunnel (Quick Tunnel)
 
 HQ Mode Options:
   --hq                  Run as HQ (headquarters) server
@@ -149,10 +195,20 @@ Environment Variables:
   VIBETUNNEL_PASSWORD   Default password if --password not specified
   VIBETUNNEL_CONTROL_DIR Control directory for session data
   PUSH_CONTACT_EMAIL    Contact email for VAPID configuration
+  NGROK_AUTHTOKEN       Ngrok auth token (used with --ngrok)
 
 Examples:
   # Run a simple server with authentication
   vibetunnel-server --username admin --password secret
+
+  # Run with ngrok tunnel (no auth)
+  vibetunnel-server --no-auth --ngrok
+
+  # Run with Cloudflare tunnel
+  vibetunnel-server --no-auth --cloudflare
+
+  # Run with ngrok and custom domain
+  vibetunnel-server --ngrok --ngrok-auth TOKEN --ngrok-domain custom.ngrok.io
 
   # Run as HQ server
   vibetunnel-server --hq --username hq-admin --password hq-secret
@@ -168,6 +224,7 @@ Examples:
 // Parse command line arguments
 function parseArgs(): Config {
   const args = process.argv.slice(2);
+  const envNgrokAuthToken = process.env.NGROK_AUTHTOKEN?.trim() || null;
   const config = {
     port: null as number | null,
     bind: null as string | null,
@@ -193,10 +250,19 @@ function parseArgs(): Config {
     localAuthToken: null as string | null,
     // Tailscale Serve integration (manages auth and proxy)
     enableTailscaleServe: false,
+    // Tailscale Funnel integration (public internet access)
+    enableTailscaleFunnel: false,
     // HQ auth bypass for testing
     noHqAuth: false,
     // mDNS advertisement
     enableMDNS: true, // Enable mDNS by default
+    // Ngrok tunnel configuration
+    enableNgrok: false,
+    ngrokAuthToken: envNgrokAuthToken as string | null,
+    ngrokDomain: null as string | null,
+    ngrokRegion: null as string | null,
+    // Cloudflare tunnel configuration
+    enableCloudflare: false,
   };
 
   // Check for help flag first
@@ -260,10 +326,28 @@ function parseArgs(): Config {
       i++; // Skip the token value in next iteration
     } else if (args[i] === '--enable-tailscale-serve') {
       config.enableTailscaleServe = true;
+    } else if (args[i] === '--enable-tailscale-funnel') {
+      config.enableTailscaleFunnel = true;
     } else if (args[i] === '--no-hq-auth') {
       config.noHqAuth = true;
     } else if (args[i] === '--no-mdns') {
       config.enableMDNS = false;
+    } else if (args[i] === '--ngrok') {
+      config.enableNgrok = true;
+    } else if (args[i] === '--ngrok-auth' && i + 1 < args.length) {
+      config.ngrokAuthToken = args[i + 1];
+      config.enableNgrok = true;
+      i++; // Skip the token value in next iteration
+    } else if (args[i] === '--ngrok-domain' && i + 1 < args.length) {
+      config.ngrokDomain = args[i + 1];
+      config.enableNgrok = true;
+      i++; // Skip the domain value in next iteration
+    } else if (args[i] === '--ngrok-region' && i + 1 < args.length) {
+      config.ngrokRegion = args[i + 1];
+      config.enableNgrok = true;
+      i++; // Skip the region value in next iteration
+    } else if (args[i] === '--cloudflare') {
+      config.enableCloudflare = true;
     } else if (args[i].startsWith('--')) {
       // Unknown argument
       logger.error(`Unknown argument: ${args[i]}`);
@@ -327,12 +411,10 @@ function validateConfig(config: ReturnType<typeof parseArgs>) {
     process.exit(1);
   }
 
-  // Validate Tailscale configuration
-  if (config.enableTailscaleServe && config.bind === '0.0.0.0') {
-    logger.error('Security Error: Cannot bind to 0.0.0.0 when using Tailscale Serve');
-    logger.error('Tailscale Serve requires binding to localhost (127.0.0.1)');
-    logger.error('Use --bind 127.0.0.1 or disable Tailscale Serve');
-    process.exit(1);
+  // Note: Tailscale Serve configuration is handled by the Mac app
+  // The Mac app will restart with appropriate binding if Tailscale Serve fails
+  if (config.enableTailscaleServe) {
+    logger.info('Tailscale Serve integration enabled - Mac app will handle fallback if needed');
   }
 
   // Can't be both HQ mode and register with HQ
@@ -358,12 +440,9 @@ interface AppInstance {
   configService: ConfigService;
   ptyManager: PtyManager;
   terminalManager: TerminalManager;
-  streamWatcher: StreamWatcher;
   remoteRegistry: RemoteRegistry | null;
   hqClient: HQClient | null;
   controlDirWatcher: ControlDirWatcher | null;
-  bufferAggregator: BufferAggregator | null;
-  activityMonitor: ActivityMonitor;
   pushNotificationService: PushNotificationService | null;
 }
 
@@ -416,22 +495,13 @@ export async function createApp(): Promise<AppInstance> {
   logger.debug('Configured security headers with helmet');
 
   // Add compression middleware with Brotli support
-  // Skip compression for SSE streams (asciicast and events)
   app.use(
     compression({
-      filter: (req, res) => {
-        // Skip compression for Server-Sent Events
-        if (req.path.match(/\/api\/sessions\/[^/]+\/stream$/) || req.path === '/api/events') {
-          return false;
-        }
-        // Use default filter for other requests
-        return compression.filter(req, res);
-      },
       // Enable Brotli compression with highest priority
       level: 6, // Balanced compression level
     })
   );
-  logger.debug('Configured compression middleware (with SSE exclusion)');
+  logger.debug('Configured compression middleware');
 
   // Add JSON body parser middleware with size limit
   app.use(express.json({ limit: '10mb' }));
@@ -475,9 +545,10 @@ export async function createApp(): Promise<AppInstance> {
   const terminalManager = new TerminalManager(CONTROL_DIR);
   logger.debug('Initialized terminal manager');
 
-  // Initialize stream watcher for file-based streaming
-  const streamWatcher = new StreamWatcher(sessionManager);
-  logger.debug('Initialized stream watcher');
+  // Initialize cast output hub + git status hub for WebSocket v3
+  const castOutputHub = new CastOutputHub(sessionManager);
+  const gitStatusHub = new GitStatusHub();
+  logger.debug('Initialized v3 cast output + git status hubs');
 
   // Initialize session monitor with PTY manager
   const sessionMonitor = new SessionMonitor(ptyManager);
@@ -486,10 +557,6 @@ export async function createApp(): Promise<AppInstance> {
   // Set the session monitor on PTY manager for data tracking
   ptyManager.setSessionMonitor(sessionMonitor);
   logger.debug('Initialized session monitor');
-
-  // Initialize activity monitor
-  const activityMonitor = new ActivityMonitor(CONTROL_DIR);
-  logger.debug('Initialized activity monitor');
 
   // Initialize configuration service
   const configService = new ConfigService();
@@ -582,14 +649,6 @@ export async function createApp(): Promise<AppInstance> {
             };
             break;
 
-          case ServerEventType.ClaudeTurn:
-            pushPayload = {
-              type: 'claude-turn',
-              title: '💬 Your Turn',
-              body: event.message || 'Claude has finished responding',
-            };
-            break;
-
           case ServerEventType.TestNotification:
             // Test notifications are already handled by the test endpoint
             return;
@@ -638,7 +697,6 @@ export async function createApp(): Promise<AppInstance> {
   let remoteRegistry: RemoteRegistry | null = null;
   let hqClient: HQClient | null = null;
   let controlDirWatcher: ControlDirWatcher | null = null;
-  let bufferAggregator: BufferAggregator | null = null;
   let remoteBearerToken: string | null = null;
 
   if (config.isHQMode) {
@@ -659,24 +717,17 @@ export async function createApp(): Promise<AppInstance> {
   const authService = new AuthService();
   logger.debug('Initialized authentication service');
 
-  // Initialize buffer aggregator
-  bufferAggregator = new BufferAggregator({
-    terminalManager,
-    remoteRegistry,
-    isHQMode: config.isHQMode,
-  });
-  logger.debug('Initialized buffer aggregator');
-
-  // Initialize WebSocket input handler
-  const websocketInputHandler = new WebSocketInputHandler({
+  // Initialize v3 WebSocket hub (single-socket terminal transport)
+  const wsV3Hub = new WsV3Hub({
     ptyManager,
     terminalManager,
-    activityMonitor,
+    castOutputHub,
+    gitStatusHub,
+    sessionMonitor,
     remoteRegistry,
-    authService,
     isHQMode: config.isHQMode,
   });
-  logger.debug('Initialized WebSocket input handler');
+  logger.debug('Initialized WebSocket v3 hub');
 
   // Set up authentication
   const authMiddleware = createAuthMiddleware({
@@ -800,16 +851,103 @@ export async function createApp(): Promise<AppInstance> {
   );
 
   // Health check endpoint (no auth required)
-  app.get('/api/health', (_req, res) => {
+  app.get('/api/health', async (_req, res) => {
     const versionInfo = getVersionInfo();
+
+    // Get connection information
+    const connections: ConnectionInfo = {
+      http: {
+        port: config.port,
+        url: `http://localhost:${config.port}`,
+      },
+      // Legacy fields for older clients
+      port: config.port,
+    };
+
+    let responseTailscaleUrl: string | undefined;
+
+    // Check if Tailscale is enabled and get status
+    if (config.enableTailscaleServe) {
+      try {
+        const tailscaleStatus = await tailscaleServeService.getStatus();
+
+        // Get Tailscale hostname if available
+        let tailscaleHostname: string | undefined;
+        let tailscaleUrl: string | undefined;
+
+        if (tailscaleStatus.isRunning && !tailscaleStatus.isPermanentlyDisabled) {
+          try {
+            // Get Tailscale hostname from status
+            const { execSync } = await import('child_process');
+            const statusJson = execSync('tailscale status --json', { encoding: 'utf8' });
+            const status = JSON.parse(statusJson);
+
+            if (status.Self?.DNSName) {
+              // Remove trailing dot from DNS name
+              tailscaleHostname = status.Self.DNSName.replace(/\.$/, '');
+              tailscaleUrl = `https://${tailscaleHostname}`;
+              logger.debug(`Tailscale hostname detected: ${tailscaleHostname}`);
+            }
+          } catch (error) {
+            logger.debug('Failed to get Tailscale hostname:', error);
+          }
+        }
+
+        // HTTPS is only available when Funnel (public mode) is enabled
+        // In private mode, HTTPS doesn't work from mobile devices due to self-signed certs
+        const httpsActuallyAvailable =
+          tailscaleStatus.isRunning &&
+          !tailscaleStatus.isPermanentlyDisabled &&
+          (tailscaleStatus.funnelEnabled || false);
+        const tailscaleAvailable =
+          tailscaleStatus.isRunning && !tailscaleStatus.isPermanentlyDisabled;
+
+        connections.tailscale = {
+          available: tailscaleAvailable,
+          isRunning: tailscaleStatus.isRunning,
+          httpsAvailable: httpsActuallyAvailable,
+          isPublic: tailscaleStatus.funnelEnabled || false,
+          funnel: tailscaleStatus.funnelEnabled || false,
+          mode: tailscaleStatus.actualMode || 'private',
+          hostname: tailscaleHostname,
+          httpsUrl: httpsActuallyAvailable ? tailscaleUrl : undefined,
+        };
+        connections.sslAvailable = httpsActuallyAvailable;
+        connections.isPublic = tailscaleStatus.funnelEnabled || false;
+
+        // Add the HTTPS URL at the top level for easy access only if actually available
+        if (httpsActuallyAvailable && tailscaleUrl) {
+          connections.tailscaleUrl = tailscaleUrl;
+          responseTailscaleUrl = tailscaleUrl;
+        }
+      } catch (error) {
+        logger.debug('Failed to get Tailscale status for health endpoint:', error);
+        connections.tailscale = {
+          available: false,
+          isRunning: false,
+          httpsAvailable: false,
+          isPublic: false,
+          funnel: false,
+          mode: 'private',
+        };
+        connections.sslAvailable = false;
+        connections.isPublic = false;
+      }
+    } else {
+      connections.sslAvailable = false;
+      connections.isPublic = false;
+    }
+
     res.json({
-      status: 'ok',
+      status: 'healthy',
       timestamp: new Date().toISOString(),
       mode: config.isHQMode ? 'hq' : 'remote',
       version: versionInfo.version,
       buildDate: versionInfo.buildDate,
       uptime: versionInfo.uptime,
       pid: versionInfo.pid,
+      connections,
+      ...(responseTailscaleUrl ? { tailscaleUrl: responseTailscaleUrl } : {}),
     });
   });
 
@@ -918,38 +1056,6 @@ export async function createApp(): Promise<AppInstance> {
         });
     });
     logger.debug('Connected command finished notifications to PTY manager');
-
-    // Connect Claude turn notifications
-    ptyManager.on('claudeTurn', (sessionId: string, sessionName: string) => {
-      logger.info(
-        `🔔 NOTIFICATION DEBUG: Sending push notification for Claude turn - sessionId: ${sessionId}`
-      );
-
-      pushNotificationService
-        .sendNotification({
-          type: 'claude-turn',
-          title: 'Claude Ready',
-          body: `${sessionName} is waiting for your input.`,
-          icon: '/apple-touch-icon.png',
-          badge: '/favicon-32.png',
-          tag: `vibetunnel-claude-turn-${sessionId}`,
-          requireInteraction: true,
-          data: {
-            type: 'claude-turn',
-            sessionId,
-            sessionName,
-            timestamp: new Date().toISOString(),
-          },
-          actions: [
-            { action: 'view-session', title: 'View Session' },
-            { action: 'dismiss', title: 'Dismiss' },
-          ],
-        })
-        .catch((error) => {
-          logger.error('Failed to send Claude turn notification:', error);
-        });
-    });
-    logger.debug('Connected Claude turn notifications to PTY manager');
   }
 
   // Apply auth middleware to all API routes (including auth routes for Tailscale header detection)
@@ -974,10 +1080,8 @@ export async function createApp(): Promise<AppInstance> {
     createSessionRoutes({
       ptyManager,
       terminalManager,
-      streamWatcher,
       remoteRegistry,
       isHQMode: config.isHQMode,
-      activityMonitor,
     })
   );
   logger.debug('Mounted session routes');
@@ -1024,10 +1128,6 @@ export async function createApp(): Promise<AppInstance> {
   app.use('/api', createWorktreeRoutes());
   logger.debug('Mounted worktree routes');
 
-  // Mount control routes
-  app.use('/api', createControlRoutes());
-  logger.debug('Mounted control routes');
-
   // Mount tmux routes
   app.use('/api/tmux', createTmuxRoutes({ ptyManager }));
   logger.debug('Mounted tmux routes');
@@ -1047,10 +1147,6 @@ export async function createApp(): Promise<AppInstance> {
     })
   );
   logger.debug('Mounted push notification routes');
-
-  // Mount events router for SSE streaming
-  app.use('/api', createEventsRouter(sessionMonitor));
-  logger.debug('Mounted events routes');
 
   // Mount test notification router
   app.use('/api', createTestNotificationRouter({ sessionMonitor, pushNotificationService }));
@@ -1082,7 +1178,7 @@ export async function createApp(): Promise<AppInstance> {
     const parsedUrl = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
 
     // Handle WebSocket paths
-    if (parsedUrl.pathname !== '/buffers' && parsedUrl.pathname !== '/ws/input') {
+    if (parsedUrl.pathname !== '/ws') {
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
       socket.destroy();
       return;
@@ -1205,36 +1301,14 @@ export async function createApp(): Promise<AppInstance> {
   wss.on('connection', (ws, req) => {
     const wsReq = req as WebSocketRequest;
     const pathname = wsReq.pathname;
-    const searchParams = wsReq.searchParams;
 
     logger.log(`🔌 WebSocket connection to path: ${pathname}`);
     logger.log(`👤 User ID: ${wsReq.userId || 'unknown'}`);
     logger.log(`🔐 Auth method: ${wsReq.authMethod || 'unknown'}`);
 
-    if (pathname === '/buffers') {
-      logger.log('📊 Handling buffer WebSocket connection');
-      // Handle buffer updates WebSocket
-      if (bufferAggregator) {
-        bufferAggregator.handleClientConnection(ws);
-      } else {
-        logger.error('BufferAggregator not initialized for WebSocket connection');
-        ws.close();
-      }
-    } else if (pathname === '/ws/input') {
-      logger.log('⌨️ Handling input WebSocket connection');
-      // Handle input WebSocket
-      const sessionId = searchParams?.get('sessionId');
-
-      if (!sessionId) {
-        logger.error('WebSocket input connection missing sessionId parameter');
-        ws.close();
-        return;
-      }
-
-      // Extract user ID from the authenticated request
-      const userId = wsReq.userId || 'unknown';
-
-      websocketInputHandler.handleConnection(ws, sessionId, userId);
+    if (pathname === '/ws') {
+      logger.log('🧩 Handling v3 WebSocket connection');
+      wsV3Hub.handleClientConnection(ws, wsReq);
     } else {
       logger.error(`❌ Unknown WebSocket path: ${pathname}`);
       ws.close();
@@ -1313,7 +1387,9 @@ export async function createApp(): Promise<AppInstance> {
 
     // Regular TCP mode
     logger.log(`Starting server on port ${requestedPort}`);
-    const bindAddress = config.bind || (config.enableTailscaleServe ? '127.0.0.1' : '0.0.0.0');
+    // Use the requested bind address - don't force localhost just because Tailscale is enabled
+    // The Mac app will handle binding logic based on actual Tailscale Serve status
+    const bindAddress = config.bind || '0.0.0.0';
     server.listen(requestedPort, bindAddress, () => {
       const address = server.address();
       const actualPort =
@@ -1343,30 +1419,105 @@ export async function createApp(): Promise<AppInstance> {
         }
       }
 
+      // Validate Tailscale configuration
+      if (config.enableTailscaleFunnel && !config.enableTailscaleServe) {
+        logger.error('Tailscale Funnel requires Tailscale Serve to be enabled');
+        process.exit(1);
+      }
+
       // Start Tailscale Serve if requested
       if (config.enableTailscaleServe) {
-        logger.log(chalk.blue('Starting Tailscale Serve integration...'));
+        logger.info(chalk.blue('Starting Tailscale Serve integration...'));
 
         tailscaleServeService
-          .start(actualPort)
+          .start(actualPort, config.enableTailscaleFunnel)
           .then(() => {
-            logger.log(chalk.green('Tailscale Serve: ENABLED'));
-            logger.log(
+            logger.info(chalk.green('Tailscale Serve: ENABLED'));
+            if (config.enableTailscaleFunnel) {
+              logger.warn(chalk.yellow('Tailscale Funnel: ENABLED - PUBLIC INTERNET ACCESS'));
+            }
+            logger.info(
               chalk.gray('Users will be auto-authenticated via Tailscale identity headers')
             );
-            logger.log(
+            logger.info(
               chalk.gray(
                 `Access via HTTPS on your Tailscale hostname (e.g., https://hostname.tailnet.ts.net)`
               )
             );
           })
           .catch((error) => {
-            logger.error(chalk.red('Failed to start Tailscale Serve:'), error.message);
+            logger.error(chalk.red('❌ Failed to start Tailscale Serve:'), error.message);
             logger.warn(
-              chalk.yellow('VibeTunnel will continue running, but Tailscale Serve is not available')
+              chalk.yellow(
+                '⚠️ VibeTunnel will continue running, but Tailscale Serve is not available'
+              )
             );
-            logger.log(chalk.blue('You can manually configure Tailscale Serve with:'));
-            logger.log(chalk.gray(`  tailscale serve ${actualPort}`));
+            logger.info(chalk.blue('💻 You can manually configure Tailscale Serve with:'));
+            logger.info(chalk.gray(`  tailscale serve ${actualPort}`));
+          });
+      }
+
+      // Start ngrok tunnel if requested
+      if (config.enableNgrok) {
+        logger.log(chalk.blue('Starting ngrok tunnel...'));
+
+        const ngrokService = new NgrokService({
+          port: actualPort,
+          authToken: config.ngrokAuthToken || undefined,
+          domain: config.ngrokDomain || undefined,
+          region: config.ngrokRegion || undefined,
+        });
+        globalTunnelState.__ngrokService = ngrokService;
+
+        ngrokService
+          .start()
+          .then((tunnel) => {
+            logger.log(chalk.green('Ngrok tunnel: ENABLED'));
+            logger.log(chalk.green(`Public URL: ${tunnel.publicUrl}`));
+            logger.log(chalk.gray('Your VibeTunnel server is now accessible from the internet'));
+          })
+          .catch((error) => {
+            logger.error(chalk.red('Failed to start ngrok tunnel:'), error.message);
+            logger.warn(
+              chalk.yellow(
+                'VibeTunnel will continue running locally, but ngrok tunnel is not available'
+              )
+            );
+            if (!config.ngrokAuthToken) {
+              logger.log(
+                chalk.blue('Tip: Set an auth token with --ngrok-auth for better reliability')
+              );
+            }
+          });
+      }
+
+      // Start Cloudflare tunnel if requested
+      if (config.enableCloudflare) {
+        logger.log(chalk.blue('Starting Cloudflare tunnel...'));
+
+        const cloudflareService = new CloudflareService(actualPort);
+        globalTunnelState.__cloudflareService = cloudflareService;
+
+        cloudflareService
+          .start()
+          .then((tunnel) => {
+            logger.log(chalk.green('Cloudflare tunnel: ENABLED'));
+            logger.log(chalk.green(`Public URL: ${tunnel.publicUrl}`));
+            logger.log(chalk.gray('Your VibeTunnel server is now accessible from the internet'));
+            logger.log(chalk.gray('Note: Cloudflare Quick Tunnels have usage limits'));
+          })
+          .catch((error) => {
+            logger.error(chalk.red('Failed to start Cloudflare tunnel:'), error.message);
+            logger.warn(
+              chalk.yellow(
+                'VibeTunnel will continue running locally, but Cloudflare tunnel is not available'
+              )
+            );
+            logger.log(
+              chalk.blue(
+                'Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/'
+              )
+            );
           });
       }
 
@@ -1443,10 +1594,6 @@ export async function createApp(): Promise<AppInstance> {
       controlDirWatcher.start();
       logger.debug('Started control directory watcher');
 
-      // Start activity monitor
-      activityMonitor.start();
-      logger.debug('Started activity monitor');
-
       // Start mDNS advertisement if enabled
       if (config.enableMDNS) {
         mdnsService.startAdvertising(actualPort).catch((err) => {
@@ -1467,12 +1614,9 @@ export async function createApp(): Promise<AppInstance> {
     configService,
     ptyManager,
     terminalManager,
-    streamWatcher,
     remoteRegistry,
     hqClient,
     controlDirWatcher,
-    bufferAggregator,
-    activityMonitor,
     pushNotificationService,
   };
 }
@@ -1507,7 +1651,6 @@ export async function startVibeTunnelServer() {
     remoteRegistry,
     hqClient,
     controlDirWatcher,
-    activityMonitor,
     config,
     configService,
   } = appInstance;
@@ -1564,9 +1707,6 @@ export async function startVibeTunnelServer() {
       }
       logger.debug('Cleared cleanup intervals');
 
-      // Stop activity monitor
-      activityMonitor.stop();
-      logger.debug('Stopped activity monitor');
       // Stop configuration service watcher
       configService.stopWatching();
       logger.debug('Stopped configuration service watcher');
@@ -1582,6 +1722,22 @@ export async function startVibeTunnelServer() {
         logger.log('Stopping Tailscale Serve...');
         await tailscaleServeService.stop();
         logger.debug('Stopped Tailscale Serve service');
+      }
+
+      // Stop ngrok tunnel if it was started
+      const ngrokService = globalTunnelState.__ngrokService;
+      if (ngrokService?.isActive()) {
+        logger.log('Stopping ngrok tunnel...');
+        await ngrokService.stop();
+        logger.debug('Stopped ngrok tunnel');
+      }
+
+      // Stop Cloudflare tunnel if it was started
+      const cloudflareService = globalTunnelState.__cloudflareService;
+      if (cloudflareService?.isActive()) {
+        logger.log('Stopping Cloudflare tunnel...');
+        await cloudflareService.stop();
+        logger.debug('Stopped Cloudflare tunnel');
       }
 
       // Stop control directory watcher

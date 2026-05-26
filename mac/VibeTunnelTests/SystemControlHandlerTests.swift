@@ -5,8 +5,8 @@ import Testing
 @Suite("System Control Handler Tests", .serialized)
 struct SystemControlHandlerTests {
     @MainActor
-    @Test("Handles system ready event")
-    func systemReadyEvent() async throws {
+    @Test
+    func handlesSystemReadyEvent() async throws {
         // Given
         var systemReadyCalled = false
         let handler = SystemControlHandler(onSystemReady: {
@@ -18,9 +18,10 @@ struct SystemControlHandlerTests {
             "id": "test-123",
             "type": "event",
             "category": "system",
-            "action": "ready"
+            "action": "ready",
         ]
-        let messageData = try JSONSerialization.data(withJSONObject: message)
+        let messageValue = JSONValue(any: message)
+        let messageData = try JSONEncoder().encode(messageValue)
 
         // When
         let response = await handler.handleMessage(messageData)
@@ -31,8 +32,8 @@ struct SystemControlHandlerTests {
     }
 
     @MainActor
-    @Test("Handles ping request")
-    func pingRequest() async throws {
+    @Test
+    func handlesPingRequest() async throws {
         let handler = SystemControlHandler()
 
         // Create ping request
@@ -40,9 +41,10 @@ struct SystemControlHandlerTests {
             "id": "test-123",
             "type": "request",
             "category": "system",
-            "action": "ping"
+            "action": "ping",
         ]
-        let messageData = try JSONSerialization.data(withJSONObject: message)
+        let messageValue = JSONValue(any: message)
+        let messageData = try JSONEncoder().encode(messageValue)
 
         // When
         let response = await handler.handleMessage(messageData)
@@ -52,11 +54,11 @@ struct SystemControlHandlerTests {
 
         // Verify ping response
         if let responseData = response,
-           let responseJson = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+           let responseJson = JSONValue.decodeObject(from: responseData)
         {
-            #expect(responseJson["id"] as? String == "test-123")
-            #expect(responseJson["type"] as? String == "response")
-            #expect(responseJson["action"] as? String == "ping")
+            #expect(responseJson["id"]?.string == "test-123")
+            #expect(responseJson["type"]?.string == "response")
+            #expect(responseJson["action"]?.string == "ping")
         }
     }
 }

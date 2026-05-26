@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { fixture, html } from '@open-wc/testing';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Session } from '@/shared/types';
 import {
   clickElement,
   resetViewport,
@@ -8,11 +9,23 @@ import {
   setViewport,
   waitForAsync,
 } from '@/test/utils/component-helpers';
-import { createMockSession, MockEventSource } from '@/test/utils/lit-test-utils';
+import { createMockSession } from '@/test/utils/lit-test-utils';
 import { resetFactoryCounters } from '@/test/utils/test-factories';
 
-// Mock EventSource globally
-global.EventSource = MockEventSource as unknown as typeof EventSource;
+const terminalSocketClientMock = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  subscribe: vi.fn(() => () => {}),
+  getConnectionStatus: vi.fn(() => true),
+  onConnectionStateChange: vi.fn(() => () => {}),
+  sendInputText: vi.fn().mockReturnValue(true),
+  sendInputKey: vi.fn().mockReturnValue(true),
+  sendResize: vi.fn().mockReturnValue(true),
+  sendResetSize: vi.fn().mockReturnValue(true),
+}));
+
+vi.mock('../services/terminal-socket-client.js', () => ({
+  terminalSocketClient: terminalSocketClientMock,
+}));
 
 // Import component type
 import type { SessionView } from './session-view';
@@ -35,13 +48,15 @@ interface SessionViewTestInterface extends SessionView {
     setTerminalRows: (value: number) => void;
     setShowWidthSelector: (value: boolean) => void;
     setTerminalMaxCols: (value: number) => void;
-    setShowMobileInput: (value: boolean) => void;
     setShowFileBrowser: (value: boolean) => void;
   };
   connectionManager?: {
     getIsConnected: () => boolean;
-    setupStreamConnection: (sessionId: string) => void;
+    connectToStream: () => void;
     cleanupStreamConnection: () => void;
+    setTerminal: (terminal: Terminal | null) => void;
+    setSession: (session: unknown) => void;
+    setConnected: (connected: boolean) => void;
   };
   terminalLifecycleManager?: {
     getTerminal: () => Terminal | null;
@@ -68,7 +83,6 @@ describe('SessionView', () => {
     // Import components to register custom elements
     await import('./session-view');
     await import('./terminal');
-    await import('./vibe-terminal-binary');
     await import('./session-view/terminal-renderer');
   });
 
@@ -81,6 +95,9 @@ describe('SessionView', () => {
 
     // Clear localStorage to prevent test pollution
     localStorage.clear();
+    terminalSocketClientMock.sendInputText.mockClear();
+    terminalSocketClientMock.sendInputKey.mockClear();
+    terminalSocketClientMock.subscribe.mockClear();
 
     // Reset matchMedia mock for consistent behavior
     if (vi.isMockFunction(window.matchMedia)) {
@@ -116,8 +133,6 @@ describe('SessionView', () => {
   afterEach(() => {
     element.remove();
     fetchMock.clear();
-    // Clear all EventSource instances
-    MockEventSource.instances.clear();
     // Clear all spy/mock calls but don't restore globals
     vi.clearAllMocks();
   });
@@ -216,11 +231,6 @@ describe('SessionView', () => {
 
       // Mock fetch responses
       fetchMock.mockResponse('/api/sessions/test-session-123', mockSession);
-      fetchMock.mockResponse('/api/sessions/test-session-123/activity', {
-        isActive: false,
-        timestamp: new Date().toISOString(),
-      });
-
       element.session = mockSession;
       await element.updateComplete;
 
@@ -283,6 +293,36 @@ describe('SessionView', () => {
     });
   });
 
+  describe('session header layout', () => {
+    it('should constrain header content for long path and branch names', async () => {
+      const mockSession = {
+        ...createMockSession({ id: 'header-session-1' }),
+        gitRepoPath: '/tmp/repo',
+        gitBranch: 'feature/super-long-branch-name',
+      } as Session;
+
+      fetchMock.mockResponse('/api/sessions/header-session-1', mockSession);
+      element.session = mockSession;
+      await element.updateComplete;
+      await waitForAsync();
+
+      const header = element.querySelector('session-header');
+      expect(header).toBeTruthy();
+
+      const headerContainer = header?.querySelector('.session-header-container');
+      expect(headerContainer?.classList.contains('max-w-[100vw]')).toBe(true);
+
+      const path = header?.querySelector('clickable-path');
+      expect(path?.classList.contains('min-w-0')).toBe(true);
+      expect(path?.classList.contains('flex-1')).toBe(true);
+
+      const badge = header?.querySelector('git-status-badge');
+      expect(badge).toBeTruthy();
+      expect(badge?.classList.contains('min-w-0')).toBe(true);
+      expect(badge?.classList.contains('max-w-[30%]')).toBe(true);
+    });
+  });
+
   describe('terminal interaction', () => {
     beforeEach(async () => {
       const mockSession = createMockSession();
@@ -291,18 +331,6 @@ describe('SessionView', () => {
     });
 
     it('should send keyboard input to terminal', async () => {
-      // Mock fetch for sendInput
-      const inputCapture = vi.fn();
-      (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(
-        (url: string, options: RequestInit) => {
-          if (url.includes('/input')) {
-            inputCapture(JSON.parse(options.body));
-            return Promise.resolve({ ok: true });
-          }
-          return Promise.resolve({ ok: true });
-        }
-      );
-
       // Use the input manager directly instead of simulating keyboard events
       // biome-ignore lint/suspicious/noExplicitAny: need to access private property for testing
       const inputManager = (element as any).inputManager;
@@ -311,21 +339,13 @@ describe('SessionView', () => {
       // Wait for async operation
       await waitForAsync();
 
-      expect(inputCapture).toHaveBeenCalledWith({ text: 'a' });
+      expect(terminalSocketClientMock.sendInputText).toHaveBeenCalledWith(
+        (element.session as { id: string }).id,
+        'a'
+      );
     });
 
     it('should handle special keys', async () => {
-      const inputCapture = vi.fn();
-      (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(
-        (url: string, options: RequestInit) => {
-          if (url.includes('/input')) {
-            inputCapture(JSON.parse(options.body));
-            return Promise.resolve({ ok: true });
-          }
-          return Promise.resolve({ ok: true });
-        }
-      );
-
       // Use the input manager directly instead of simulating keyboard events
       // biome-ignore lint/suspicious/noExplicitAny: need to access private property for testing
       const inputManager = (element as any).inputManager;
@@ -333,15 +353,21 @@ describe('SessionView', () => {
       // Test Enter key
       await inputManager.sendInput('enter');
       await waitForAsync();
-      expect(inputCapture).toHaveBeenCalledWith({ key: 'enter' });
+      expect(terminalSocketClientMock.sendInputKey).toHaveBeenCalledWith(
+        (element.session as { id: string }).id,
+        'enter'
+      );
 
       // Clear mock calls
-      inputCapture.mockClear();
+      terminalSocketClientMock.sendInputKey.mockClear();
 
       // Test Escape key
       await inputManager.sendInput('escape');
       await waitForAsync();
-      expect(inputCapture).toHaveBeenCalledWith({ key: 'escape' });
+      expect(terminalSocketClientMock.sendInputKey).toHaveBeenCalledWith(
+        (element.session as { id: string }).id,
+        'escape'
+      );
     });
 
     it.skip('should handle paste event from terminal', async () => {
@@ -411,25 +437,30 @@ describe('SessionView', () => {
   });
 
   describe('stream connection', () => {
-    it('should establish SSE connection for running session', async () => {
+    it('should establish v3 subscription for running session', async () => {
       const mockSession = createMockSession({ status: 'running' });
 
       element.session = mockSession;
       await element.updateComplete;
 
-      // Wait for connection
-      await waitForAsync();
-
-      // Should create EventSource - in test environment, the connection might not be established
-      // So we'll check if the connection manager was initialized instead
       const testElement = element as SessionViewTestInterface;
       expect(testElement.connectionManager).toBeTruthy();
 
-      // If EventSource was created, verify the URL
-      if (MockEventSource.instances.size > 0) {
-        const eventSource = MockEventSource.instances.values().next().value;
-        expect(eventSource.url).toContain(`/api/sessions/${mockSession.id}/stream`);
+      const terminal = element.querySelector('vibe-terminal');
+      if (!terminal) {
+        expect(true).toBe(true);
+        return;
       }
+
+      testElement.connectionManager?.setTerminal(terminal as unknown as Terminal);
+      testElement.connectionManager?.setSession(mockSession);
+      testElement.connectionManager?.setConnected(true);
+      testElement.connectionManager?.connectToStream();
+
+      expect(terminalSocketClientMock.subscribe).toHaveBeenCalledWith(
+        mockSession.id,
+        expect.objectContaining({ stdout: true })
+      );
     });
 
     it('should handle stream messages', async () => {
@@ -438,30 +469,24 @@ describe('SessionView', () => {
       element.session = mockSession;
       await element.updateComplete;
 
-      // Wait for EventSource to be created
-      await waitForAsync();
+      const testElement = element as SessionViewTestInterface;
+      expect(testElement.connectionManager).toBeTruthy();
 
-      if (MockEventSource.instances.size > 0) {
-        // Get the mock EventSource
-        const eventSource = MockEventSource.instances.values().next().value as MockEventSource;
-
-        // Simulate terminal ready
-        const terminal = element.querySelector('vibe-terminal') as TerminalTestInterface;
-        if (terminal) {
-          terminal.dispatchEvent(new Event('terminal-ready', { bubbles: true }));
-        }
-
-        // Simulate stream message
-        eventSource.mockMessage('Test output from server');
-
-        await element.updateComplete;
-
-        // Connection state should update through manager
-        const testElement = element as SessionViewTestInterface;
-        if (testElement.connectionManager) {
-          expect(testElement.connectionManager.getIsConnected()).toBe(true);
-        }
+      const terminal = element.querySelector('vibe-terminal');
+      if (!terminal) {
+        expect(true).toBe(true);
+        return;
       }
+
+      testElement.connectionManager?.setTerminal(terminal as unknown as Terminal);
+      testElement.connectionManager?.setSession(mockSession);
+      testElement.connectionManager?.setConnected(true);
+      testElement.connectionManager?.connectToStream();
+
+      expect(terminalSocketClientMock.subscribe).toHaveBeenCalledWith(
+        mockSession.id,
+        expect.objectContaining({ stdout: true })
+      );
     });
 
     it('should handle session exit event', async () => {
@@ -472,39 +497,26 @@ describe('SessionView', () => {
       element.session = mockSession;
       await element.updateComplete;
 
-      // Wait for EventSource
+      // Wait for initial setup
       await waitForAsync();
 
-      if (MockEventSource.instances.size > 0) {
-        // Get the mock EventSource
-        const eventSource = MockEventSource.instances.values().next().value as MockEventSource;
-
-        // Simulate session exit event
-        eventSource.mockMessage('{"status": "exited", "exit_code": 0}', 'session-exit');
-
+      // Session status update happens via terminal event
+      const terminal = element.querySelector('vibe-terminal');
+      if (terminal) {
+        terminal.dispatchEvent(
+          new CustomEvent('session-exit', {
+            detail: {
+              sessionId: mockSession.id,
+              status: 'exited',
+              exitCode: 0,
+            },
+            bubbles: true,
+          })
+        );
         await element.updateComplete;
-        await waitForAsync();
-
-        // Terminal receives exit event and updates
-        // Note: The session status update happens via terminal event, not directly
-        const terminal = element.querySelector('vibe-terminal');
-        if (terminal) {
-          // Dispatch session-exit from terminal with sessionId (required by handler)
-          terminal.dispatchEvent(
-            new CustomEvent('session-exit', {
-              detail: {
-                sessionId: mockSession.id,
-                status: 'exited',
-                exitCode: 0,
-              },
-              bubbles: true,
-            })
-          );
-          await element.updateComplete;
-        }
-
-        expect(element.session?.status).toBe('exited');
       }
+
+      expect(element.session?.status).toBe('exited');
     });
   });
 
@@ -520,65 +532,21 @@ describe('SessionView', () => {
       await element.updateComplete;
     });
 
-    it('should show mobile input overlay', async () => {
-      const testElement = element as SessionViewTestInterface;
-      testElement.uiStateManager.setShowMobileInput(true);
+    it('should render mobile action bar', async () => {
       await element.updateComplete;
 
-      // The mobile input is rendered conditionally based on showMobileInput state
-      // Check overlays-container which contains all overlays
-      const overlaysContainer = element.querySelector('overlays-container');
-
-      // Or check for any mobile-related element in the DOM (no shadow DOM)
-      const mobileInputOverlay = element.querySelector('mobile-input-overlay');
-      const mobileOverlayDiv = element.querySelector('.mobile-overlay');
-
-      // Check the UI state is correctly set
-      expect(testElement.uiStateManager.getState().showMobileInput).toBe(true);
-
-      // At least one mobile-related element should exist or the state should be set
-      expect(
-        overlaysContainer ||
-          mobileInputOverlay ||
-          mobileOverlayDiv ||
-          testElement.uiStateManager.getState().showMobileInput
-      ).toBeTruthy();
+      const mobileActionBar = element.querySelector('mobile-action-bar');
+      expect(mobileActionBar).toBeTruthy();
     });
 
-    it('should send mobile input text', async () => {
-      const inputCapture = vi.fn();
-      (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(
-        (url: string, options: RequestInit) => {
-          if (url.includes('/input')) {
-            inputCapture(JSON.parse(options.body));
-            return Promise.resolve({ ok: true });
-          }
-          return Promise.resolve({ ok: true });
-        }
-      );
-
+    it('should keep floating keyboard button available when quick keys are visible', async () => {
       const testElement = element as SessionViewTestInterface;
-      testElement.uiStateManager.setShowMobileInput(true);
+      testElement.uiStateManager.setShowQuickKeys(true);
       await element.updateComplete;
 
-      // Look for mobile input form
-      const form = element.querySelector('form');
-      if (form) {
-        const input = form.querySelector('input') as HTMLInputElement;
-        if (input) {
-          input.value = 'mobile text';
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-
-          // Submit form
-          form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-
-          await waitForAsync();
-          // Component sends text and enter separately
-          expect(inputCapture).toHaveBeenCalledTimes(2);
-          expect(inputCapture).toHaveBeenNthCalledWith(1, { text: 'mobile text' });
-          expect(inputCapture).toHaveBeenNthCalledWith(2, { key: 'enter' });
-        }
-      }
+      const keyboardButton = element.querySelector('.mobile-keyboard-button');
+      expect(keyboardButton).toBeTruthy();
+      expect(keyboardButton?.classList.contains('quick-keys-visible')).toBe(true);
     });
   });
 
@@ -595,17 +563,6 @@ describe('SessionView', () => {
     });
 
     it('should handle file selection', async () => {
-      const inputCapture = vi.fn();
-      (global.fetch as ReturnType<typeof vi.fn>).mockImplementation(
-        (url: string, options: RequestInit) => {
-          if (url.includes('/input')) {
-            inputCapture(JSON.parse(options.body));
-            return Promise.resolve({ ok: true });
-          }
-          return Promise.resolve({ ok: true });
-        }
-      );
-
       const mockSession = createMockSession();
       element.session = mockSession;
       const testElement = element as SessionViewTestInterface;
@@ -624,7 +581,10 @@ describe('SessionView', () => {
         await waitForAsync();
 
         // Component sends the path as text
-        expect(inputCapture).toHaveBeenCalledWith({ text: '/home/user/file.txt' });
+        expect(terminalSocketClientMock.sendInputText).toHaveBeenCalledWith(
+          mockSession.id,
+          '/home/user/file.txt'
+        );
         // Note: showFileBrowser is not automatically closed on insert-path
       }
     });
@@ -897,22 +857,30 @@ describe('SessionView', () => {
 
   describe('cleanup', () => {
     it('should cleanup on disconnect', async () => {
+      const unsubscribeSpy = vi.fn();
+      terminalSocketClientMock.subscribe.mockReturnValueOnce(unsubscribeSpy);
+
       const mockSession = createMockSession();
       element.session = mockSession;
       await element.updateComplete;
 
-      // Create connection
-      await waitForAsync();
-
-      const instancesBefore = MockEventSource.instances.size;
+      // Create a v3 subscription via ConnectionManager
+      const connectionManager = (element as unknown as { connectionManager: unknown })
+        .connectionManager as {
+        setTerminal: (t: unknown) => void;
+        setSession: (s: unknown) => void;
+        setConnected: (c: boolean) => void;
+        connectToStream: () => void;
+      };
+      connectionManager.setTerminal({ write: vi.fn() });
+      connectionManager.setSession(mockSession);
+      connectionManager.setConnected(true);
+      connectionManager.connectToStream();
 
       // Disconnect
       element.disconnectedCallback();
 
-      // EventSource should be cleaned up
-      if (instancesBefore > 0) {
-        expect(MockEventSource.instances.size).toBeLessThan(instancesBefore);
-      }
+      expect(unsubscribeSpy).toHaveBeenCalled();
     });
   });
 
@@ -979,171 +947,163 @@ describe('SessionView', () => {
       vi.restoreAllMocks();
     });
 
-    it(
-      'should debounce multiple rapid calls to updateTerminalTransform',
-      { timeout: 10000 },
-      async () => {
-        // Enable fake timers
-        vi.useFakeTimers();
+    it('should debounce multiple rapid calls to updateTerminalTransform', {
+      timeout: 10000,
+    }, async () => {
+      // Enable fake timers
+      vi.useFakeTimers();
 
-        // Call updateTerminalTransform multiple times rapidly
-        (element as SessionViewTestInterface).updateTerminalTransform();
-        (element as SessionViewTestInterface).updateTerminalTransform();
-        (element as SessionViewTestInterface).updateTerminalTransform();
-        (element as SessionViewTestInterface).updateTerminalTransform();
-        (element as SessionViewTestInterface).updateTerminalTransform();
+      // Call updateTerminalTransform multiple times rapidly
+      (element as SessionViewTestInterface).updateTerminalTransform();
+      (element as SessionViewTestInterface).updateTerminalTransform();
+      (element as SessionViewTestInterface).updateTerminalTransform();
+      (element as SessionViewTestInterface).updateTerminalTransform();
+      (element as SessionViewTestInterface).updateTerminalTransform();
 
-        // Verify fitTerminal hasn't been called yet
-        expect(fitTerminalSpy).not.toHaveBeenCalled();
+      // Verify fitTerminal hasn't been called yet
+      expect(fitTerminalSpy).not.toHaveBeenCalled();
 
-        // Advance timers by 50ms (less than debounce time)
-        vi.advanceTimersByTime(50);
-        expect(fitTerminalSpy).not.toHaveBeenCalled();
+      // Advance timers by 50ms (less than debounce time)
+      vi.advanceTimersByTime(50);
+      expect(fitTerminalSpy).not.toHaveBeenCalled();
 
-        // Advance timers past the debounce time (100ms total)
-        vi.advanceTimersByTime(60);
+      // Advance timers past the debounce time (100ms total)
+      vi.advanceTimersByTime(60);
 
-        // Wait for requestAnimationFrame
-        await vi.runAllTimersAsync();
+      // Wait for requestAnimationFrame
+      await vi.runAllTimersAsync();
 
-        // Now fitTerminal should have been called exactly once
-        expect(fitTerminalSpy).toHaveBeenCalledTimes(1);
+      // Now fitTerminal should have been called exactly once
+      expect(fitTerminalSpy).toHaveBeenCalledTimes(1);
 
-        vi.useRealTimers();
-      }
-    );
+      vi.useRealTimers();
+    });
 
-    it.skip(
-      'should properly calculate terminal height with keyboard and quick keys',
-      { timeout: 10000 },
-      async () => {
-        vi.useFakeTimers();
+    it.skip('should properly calculate terminal height with keyboard and quick keys', {
+      timeout: 10000,
+    }, async () => {
+      vi.useFakeTimers();
 
-        // Mock matchMedia for mobile detection
-        window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-          matches: query.includes('max-width: 768px'),
-          media: query,
-          onchange: null,
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          dispatchEvent: vi.fn(),
-        }));
+      // Mock matchMedia for mobile detection
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes('max-width: 768px'),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
 
-        // Set mobile mode and show quick keys
-        const testElement = element as SessionViewTestInterface;
-        testElement.uiStateManager.setIsMobile(true);
-        testElement.uiStateManager.setShowQuickKeys(true);
-        testElement.uiStateManager.setKeyboardHeight(300);
+      // Set mobile mode and show quick keys
+      const testElement = element as SessionViewTestInterface;
+      testElement.uiStateManager.setIsMobile(true);
+      testElement.uiStateManager.setShowQuickKeys(true);
+      testElement.uiStateManager.setKeyboardHeight(300);
 
-        // Call updateTerminalTransform
-        (element as SessionViewTestInterface).updateTerminalTransform();
+      // Call updateTerminalTransform
+      (element as SessionViewTestInterface).updateTerminalTransform();
 
-        // Advance timers past debounce
-        vi.advanceTimersByTime(110);
-        await vi.runAllTimersAsync();
-        await element.updateComplete;
+      // Advance timers past debounce
+      vi.advanceTimersByTime(110);
+      await vi.runAllTimersAsync();
+      await element.updateComplete;
 
-        // On mobile with keyboard and quick keys, CSS variables should be set
-        const containerElement = element.querySelector('.session-view-grid');
-        expect(containerElement).toBeTruthy();
-        // Check that the CSS variable is set in the inline style attribute
-        expect(containerElement?.getAttribute('style')).toContain('--keyboard-height: 300px');
+      // On mobile with keyboard and quick keys, CSS variables should be set
+      const containerElement = element.querySelector('.session-view-grid');
+      expect(containerElement).toBeTruthy();
+      // Check that the CSS variable is set in the inline style attribute
+      expect(containerElement?.getAttribute('style')).toContain('--keyboard-height: 300px');
 
-        // fitTerminal should be called even on mobile now (height changes allowed)
-        expect(fitTerminalSpy).toHaveBeenCalledTimes(1);
+      // fitTerminal should be called even on mobile now (height changes allowed)
+      expect(fitTerminalSpy).toHaveBeenCalledTimes(1);
 
-        // scrollToBottom should be called when height is reduced
-        expect(terminalElement.scrollToBottom).toHaveBeenCalled();
+      // scrollToBottom should be called when height is reduced
+      expect(terminalElement.scrollToBottom).toHaveBeenCalled();
 
-        vi.useRealTimers();
-      }
-    );
+      vi.useRealTimers();
+    });
 
-    it.skip(
-      'should only apply quick keys height adjustment on mobile',
-      { timeout: 10000 },
-      async () => {
-        vi.useFakeTimers();
+    it.skip('should only apply quick keys height adjustment on mobile', {
+      timeout: 10000,
+    }, async () => {
+      vi.useFakeTimers();
 
-        // Set desktop mode but show quick keys
-        const testElement = element as SessionViewTestInterface;
-        testElement.uiStateManager.setIsMobile(false);
-        testElement.uiStateManager.setShowQuickKeys(true);
-        testElement.uiStateManager.setKeyboardHeight(0);
+      // Set desktop mode but show quick keys
+      const testElement = element as SessionViewTestInterface;
+      testElement.uiStateManager.setIsMobile(false);
+      testElement.uiStateManager.setShowQuickKeys(true);
+      testElement.uiStateManager.setKeyboardHeight(0);
 
-        // Call updateTerminalTransform
-        (element as SessionViewTestInterface).updateTerminalTransform();
+      // Call updateTerminalTransform
+      (element as SessionViewTestInterface).updateTerminalTransform();
 
-        // Advance timers past debounce
-        vi.advanceTimersByTime(110);
-        await vi.runAllTimersAsync();
-        await element.updateComplete;
+      // Advance timers past debounce
+      vi.advanceTimersByTime(110);
+      await vi.runAllTimersAsync();
+      await element.updateComplete;
 
-        // On desktop, CSS variables should be set (no keyboard height)
-        const containerElement = element.querySelector('.session-view-grid');
-        expect(containerElement).toBeTruthy();
-        // Check that the CSS variable is set in the inline style attribute
-        expect(containerElement?.getAttribute('style')).toContain('--keyboard-height: 0px');
+      // On desktop, CSS variables should be set (no keyboard height)
+      const containerElement = element.querySelector('.session-view-grid');
+      expect(containerElement).toBeTruthy();
+      // Check that the CSS variable is set in the inline style attribute
+      expect(containerElement?.getAttribute('style')).toContain('--keyboard-height: 0px');
 
-        vi.useRealTimers();
-      }
-    );
+      vi.useRealTimers();
+    });
 
-    it.skip(
-      'should reset terminal container height when keyboard is hidden',
-      { timeout: 10000 },
-      async () => {
-        // Ensure matchMedia is mocked before fake timers
-        const matchMediaMock = vi.fn().mockImplementation((query: string) => ({
-          matches: query.includes('max-width: 768px'),
-          media: query,
-          onchange: null,
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          dispatchEvent: vi.fn(),
-        }));
-        window.matchMedia = matchMediaMock;
+    it.skip('should reset terminal container height when keyboard is hidden', {
+      timeout: 10000,
+    }, async () => {
+      // Ensure matchMedia is mocked before fake timers
+      const matchMediaMock = vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes('max-width: 768px'),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+      window.matchMedia = matchMediaMock;
 
-        vi.useFakeTimers();
+      vi.useFakeTimers();
 
-        // Initially set some height reduction
-        const testElement = element as SessionViewTestInterface;
-        testElement.uiStateManager.setIsMobile(true);
-        testElement.uiStateManager.setShowQuickKeys(false);
-        testElement.uiStateManager.setKeyboardHeight(300);
-        (element as SessionViewTestInterface).updateTerminalTransform();
+      // Initially set some height reduction
+      const testElement = element as SessionViewTestInterface;
+      testElement.uiStateManager.setIsMobile(true);
+      testElement.uiStateManager.setShowQuickKeys(false);
+      testElement.uiStateManager.setKeyboardHeight(300);
+      (element as SessionViewTestInterface).updateTerminalTransform();
 
-        vi.advanceTimersByTime(110);
-        await vi.runAllTimersAsync();
-        await element.updateComplete;
+      vi.advanceTimersByTime(110);
+      await vi.runAllTimersAsync();
+      await element.updateComplete;
 
-        // On mobile with keyboard only, CSS variables should be set
-        const containerElement = element.querySelector('.session-view-grid');
-        expect(containerElement).toBeTruthy();
-        // Check that the CSS variable is set in the inline style attribute
-        expect(containerElement?.getAttribute('style')).toContain('--keyboard-height: 300px');
+      // On mobile with keyboard only, CSS variables should be set
+      const containerElement = element.querySelector('.session-view-grid');
+      expect(containerElement).toBeTruthy();
+      // Check that the CSS variable is set in the inline style attribute
+      expect(containerElement?.getAttribute('style')).toContain('--keyboard-height: 300px');
 
-        // Now hide the keyboard
-        testElement.uiStateManager.setKeyboardHeight(0);
-        (element as SessionViewTestInterface).updateTerminalTransform();
+      // Now hide the keyboard
+      testElement.uiStateManager.setKeyboardHeight(0);
+      (element as SessionViewTestInterface).updateTerminalTransform();
 
-        vi.advanceTimersByTime(110);
-        await vi.runAllTimersAsync();
-        await element.updateComplete;
+      vi.advanceTimersByTime(110);
+      await vi.runAllTimersAsync();
+      await element.updateComplete;
 
-        // On mobile with keyboard hidden, CSS variables should be reset
-        const containerElement2 = element.querySelector('.session-view-grid');
-        expect(containerElement2).toBeTruthy();
-        // Check that the CSS variable is set in the inline style attribute
-        expect(containerElement2?.getAttribute('style')).toContain('--keyboard-height: 0px');
+      // On mobile with keyboard hidden, CSS variables should be reset
+      const containerElement2 = element.querySelector('.session-view-grid');
+      expect(containerElement2).toBeTruthy();
+      // Check that the CSS variable is set in the inline style attribute
+      expect(containerElement2?.getAttribute('style')).toContain('--keyboard-height: 0px');
 
-        vi.useRealTimers();
-      }
-    );
+      vi.useRealTimers();
+    });
 
     it.skip('should clear pending timeout on disconnect', { timeout: 10000 }, async () => {
       vi.useFakeTimers();
@@ -1163,42 +1123,40 @@ describe('SessionView', () => {
       vi.useRealTimers();
     });
 
-    it.skip(
-      'should handle successive calls with different parameters',
-      { timeout: 10000 },
-      async () => {
-        vi.useFakeTimers();
+    it.skip('should handle successive calls with different parameters', {
+      timeout: 10000,
+    }, async () => {
+      vi.useFakeTimers();
 
-        // First call with keyboard height
-        const testElement = element as SessionViewTestInterface;
-        testElement.uiStateManager.setIsMobile(true);
-        testElement.uiStateManager.setKeyboardHeight(200);
-        (element as SessionViewTestInterface).updateTerminalTransform();
+      // First call with keyboard height
+      const testElement = element as SessionViewTestInterface;
+      testElement.uiStateManager.setIsMobile(true);
+      testElement.uiStateManager.setKeyboardHeight(200);
+      (element as SessionViewTestInterface).updateTerminalTransform();
 
-        // Second call with different height before debounce
-        testElement.uiStateManager.setKeyboardHeight(300);
-        (element as SessionViewTestInterface).updateTerminalTransform();
+      // Second call with different height before debounce
+      testElement.uiStateManager.setKeyboardHeight(300);
+      (element as SessionViewTestInterface).updateTerminalTransform();
 
-        // Third call with quick keys enabled
-        testElement.uiStateManager.setShowQuickKeys(true);
-        (element as SessionViewTestInterface).updateTerminalTransform();
+      // Third call with quick keys enabled
+      testElement.uiStateManager.setShowQuickKeys(true);
+      (element as SessionViewTestInterface).updateTerminalTransform();
 
-        // Advance timers past debounce
-        vi.advanceTimersByTime(110);
-        await vi.runAllTimersAsync();
-        await element.updateComplete;
+      // Advance timers past debounce
+      vi.advanceTimersByTime(110);
+      await vi.runAllTimersAsync();
+      await element.updateComplete;
 
-        // On mobile with quick keys and keyboard, CSS variables should be set
-        const containerElement = element.querySelector('.session-view-grid');
-        expect(containerElement).toBeTruthy();
-        // Check that the CSS variable is set in the inline style attribute
-        expect(containerElement?.getAttribute('style')).toContain('--keyboard-height: 300px');
+      // On mobile with quick keys and keyboard, CSS variables should be set
+      const containerElement = element.querySelector('.session-view-grid');
+      expect(containerElement).toBeTruthy();
+      // Check that the CSS variable is set in the inline style attribute
+      expect(containerElement?.getAttribute('style')).toContain('--keyboard-height: 300px');
 
-        // fitTerminal should be called on mobile for height changes
-        expect(fitTerminalSpy).toHaveBeenCalledTimes(1);
+      // fitTerminal should be called on mobile for height changes
+      expect(fitTerminalSpy).toHaveBeenCalledTimes(1);
 
-        vi.useRealTimers();
-      }
-    );
+      vi.useRealTimers();
+    });
   });
 });

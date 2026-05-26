@@ -33,7 +33,7 @@ struct SessionTests {
         #expect(session.workingDir == "/Users/test")
         #expect(session.name == "Test Session")
         #expect(session.status == .running)
-        #expect(session.pid == 12_345)
+        #expect(session.pid == 12345)
         #expect(session.exitCode == nil)
         #expect(session.isRunning == true)
         #expect(session.width == 80)
@@ -128,15 +128,14 @@ struct SessionTests {
             exitCode: nil,
             startedAt: "2024-01-01T10:00:00Z",
             lastModified: "2024-01-01T10:05:00Z",
-            pid: 12_345,
+            pid: 12345,
             width: 80,
             height: 24,
             waiting: false,
             source: nil,
             remoteId: nil,
             remoteName: nil,
-            remoteUrl: nil
-        )
+            remoteUrl: nil)
         #expect(unnamedSession.displayName == "/bin/bash")
     }
 
@@ -210,8 +209,7 @@ struct SessionTests {
             source: session1.source,
             remoteId: session1.remoteId,
             remoteName: session1.remoteName,
-            remoteUrl: session1.remoteUrl
-        )
+            remoteUrl: session1.remoteUrl)
         #expect(session1 != session2)
     }
 
@@ -242,20 +240,19 @@ struct SessionCreateDataTests {
             workingDir: "/Users/test",
             name: "Test Session",
             cols: 80,
-            rows: 24
-        )
+            rows: 24)
 
         // Act
         let jsonData = try JSONEncoder().encode(data)
-        let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+        let decoded = try JSONDecoder().decode(SessionCreateData.self, from: jsonData)
 
         // Assert
-        #expect(json?["command"] as? [String] == ["/bin/bash"])
-        #expect(json?["workingDir"] as? String == "/Users/test")
-        #expect(json?["name"] as? String == "Test Session")
-        #expect(json?["cols"] as? Int == 80)
-        #expect(json?["rows"] as? Int == 24)
-        #expect(json?["spawn_terminal"] as? Bool == true) // Default is true, not false
+        #expect(decoded.command == ["/bin/bash"])
+        #expect(decoded.workingDir == "/Users/test")
+        #expect(decoded.name == "Test Session")
+        #expect(decoded.cols == 80)
+        #expect(decoded.rows == 24)
+        #expect(decoded.spawnTerminal == true) // Default is true, not false
     }
 
     @Test("Uses default terminal size")
@@ -263,8 +260,7 @@ struct SessionCreateDataTests {
         // Arrange & Act
         let data = SessionCreateData(
             command: "ls",
-            workingDir: "/tmp"
-        )
+            workingDir: "/tmp")
 
         // Assert
         #expect(data.cols == 120) // Default is 120, not 80
@@ -279,14 +275,13 @@ struct SessionCreateDataTests {
         let data = SessionCreateData(
             command: "ls",
             workingDir: "/tmp",
-            name: nil
-        )
+            name: nil)
 
         // Act
         let jsonData = try JSONEncoder().encode(data)
-        let json = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+        let decoded = try JSONDecoder().decode(SessionCreateData.self, from: jsonData)
 
         // Assert
-        #expect(json?["name"] == nil)
+        #expect(decoded.name == nil)
     }
 }

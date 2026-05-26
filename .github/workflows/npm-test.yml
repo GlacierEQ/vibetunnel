@@ -46,6 +46,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libpam0g-dev build-essential python3 make g++
 
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -128,3 +133,25 @@ jobs:
           # Clean up
           kill $SERVER_PID
           echo "✅ All tests passed!"
+
+  npm-linux-dev:
+    name: Linux npm dev build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Linux bootstrap
+        run: scripts/linux-bootstrap.sh
+
+      - name: Install dependencies (npm)
+        run: npm install --legacy-peer-deps
+
+      - name: Build (npm)
+        run: npm run build

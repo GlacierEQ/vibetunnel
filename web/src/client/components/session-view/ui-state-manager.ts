@@ -23,9 +23,8 @@ export interface UIState {
   isMobile: boolean;
   isLandscape: boolean;
   showMobileInput: boolean;
-  mobileInputText: string;
-  useDirectKeyboard: boolean;
   showQuickKeys: boolean;
+  useDirectKeyboard: boolean;
   keyboardHeight: number;
 
   // Touch tracking
@@ -53,11 +52,11 @@ export interface UIState {
   terminalFontSize: number;
   terminalTheme: TerminalThemeId;
 
-  // Binary mode
-  useBinaryMode: boolean;
-
   // View mode
   viewMode: 'terminal' | 'worktree';
+
+  // Chat mode - display terminal as chat bubbles
+  chatMode: boolean;
 
   // Keyboard capture
   keyboardCaptureActive: boolean;
@@ -77,9 +76,8 @@ export class UIStateManager {
     isMobile: false,
     isLandscape: false,
     showMobileInput: false,
-    mobileInputText: '',
-    useDirectKeyboard: true, // Default to true
     showQuickKeys: false,
+    useDirectKeyboard: true,
     keyboardHeight: 0,
 
     // Touch tracking
@@ -107,11 +105,11 @@ export class UIStateManager {
     terminalFontSize: 14,
     terminalTheme: 'auto',
 
-    // Binary mode
-    useBinaryMode: false,
-
     // View mode
     viewMode: 'terminal',
+
+    // Chat mode
+    chatMode: false,
 
     // Keyboard capture
     keyboardCaptureActive: true,
@@ -150,23 +148,13 @@ export class UIStateManager {
     this.callbacks?.requestUpdate();
   }
 
-  setShowMobileInput(show: boolean): void {
-    this.state.showMobileInput = show;
-    this.callbacks?.requestUpdate();
-  }
-
-  setMobileInputText(text: string): void {
-    this.state.mobileInputText = text;
-    this.callbacks?.requestUpdate();
-  }
-
-  setUseDirectKeyboard(use: boolean): void {
-    this.state.useDirectKeyboard = use;
-    this.callbacks?.requestUpdate();
-  }
-
   setShowQuickKeys(show: boolean): void {
     this.state.showQuickKeys = show;
+    this.callbacks?.requestUpdate();
+  }
+
+  setShowMobileInput(show: boolean): void {
+    this.state.showMobileInput = show;
     this.callbacks?.requestUpdate();
   }
 
@@ -256,12 +244,6 @@ export class UIStateManager {
     this.callbacks?.requestUpdate();
   }
 
-  // Binary mode
-  setUseBinaryMode(use: boolean): void {
-    this.state.useBinaryMode = use;
-    this.callbacks?.requestUpdate();
-  }
-
   // View mode
   setViewMode(mode: 'terminal' | 'worktree'): void {
     this.state.viewMode = mode;
@@ -274,37 +256,8 @@ export class UIStateManager {
     this.callbacks?.requestUpdate();
   }
 
-  // Mobile input helpers
-  toggleMobileInput(): void {
-    this.state.showMobileInput = !this.state.showMobileInput;
-    this.callbacks?.requestUpdate();
-  }
-
   toggleCtrlAlpha(): void {
     this.state.showCtrlAlpha = !this.state.showCtrlAlpha;
-    this.callbacks?.requestUpdate();
-  }
-
-  toggleDirectKeyboard(): void {
-    this.state.useDirectKeyboard = !this.state.useDirectKeyboard;
-
-    // Save preference
-    try {
-      const stored = localStorage.getItem('vibetunnel_app_preferences');
-      const preferences = stored ? JSON.parse(stored) : {};
-      preferences.useDirectKeyboard = this.state.useDirectKeyboard;
-      localStorage.setItem('vibetunnel_app_preferences', JSON.stringify(preferences));
-
-      // Emit preference change event
-      window.dispatchEvent(
-        new CustomEvent('app-preferences-changed', {
-          detail: preferences,
-        })
-      );
-    } catch (error) {
-      logger.error('Failed to save direct keyboard preference', error);
-    }
-
     this.callbacks?.requestUpdate();
   }
 
@@ -329,5 +282,43 @@ export class UIStateManager {
       logger.error('Failed to load app preferences', error);
       this.state.useDirectKeyboard = true; // Default to true on error
     }
+  }
+
+  toggleDirectKeyboard(): void {
+    this.state.useDirectKeyboard = !this.state.useDirectKeyboard;
+    this.state.showMobileInput = false;
+
+    try {
+      const stored = localStorage.getItem('vibetunnel_app_preferences');
+      const preferences = stored ? JSON.parse(stored) : {};
+      localStorage.setItem(
+        'vibetunnel_app_preferences',
+        JSON.stringify({ ...preferences, useDirectKeyboard: this.state.useDirectKeyboard })
+      );
+    } catch (error) {
+      logger.warn('Failed to save app preferences', error);
+    }
+
+    this.callbacks?.requestUpdate();
+  }
+
+  // Chat mode
+  setChatMode(enabled: boolean): void {
+    this.state.chatMode = enabled;
+    // Hide quick keys when entering chat mode (chat has its own input)
+    if (enabled) {
+      this.state.showQuickKeys = false;
+    }
+    this.callbacks?.requestUpdate();
+  }
+
+  toggleChatMode(): void {
+    const enteringChatMode = !this.state.chatMode;
+    this.state.chatMode = enteringChatMode;
+    // Hide quick keys when entering chat mode (chat has its own input)
+    if (enteringChatMode) {
+      this.state.showQuickKeys = false;
+    }
+    this.callbacks?.requestUpdate();
   }
 }

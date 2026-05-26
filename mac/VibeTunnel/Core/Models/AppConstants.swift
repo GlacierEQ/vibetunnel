@@ -35,6 +35,7 @@ enum AppConstants {
 
         /// Remote Access Settings
         static let tailscaleServeEnabled = "tailscaleServeEnabled"
+        static let tailscaleFunnelEnabled = "tailscaleFunnelEnabled"
 
         // New Session keys
         static let newSessionCommand = "NewSession.command"
@@ -58,7 +59,7 @@ enum AppConstants {
         static let preventSleepWhenRunning = true
 
         // Server Configuration
-        static let serverPort = 4_020
+        static let serverPort = 4020
         static let dashboardAccessMode = DashboardAccessModeRawValues.network
         static let cleanupOnStartup = true
         static let authenticationMode = "os"
@@ -72,6 +73,10 @@ enum AppConstants {
         // Application Preferences
         static let showInDock = false
         static let updateChannel = "stable"
+
+        /// Tailscale Settings
+        static let tailscaleServeEnabled: Bool? = nil // Use existing UserDefaults value if set
+        static let tailscaleFunnelEnabled = false // Default to OFF for security
     }
 
     /// Helper to get boolean value with proper default
@@ -89,6 +94,10 @@ enum AppConstants {
                 return Defaults.useDevServer
             case UserDefaultsKeys.showInDock:
                 return Defaults.showInDock
+            case UserDefaultsKeys.tailscaleServeEnabled:
+                return Defaults.tailscaleServeEnabled ?? false
+            case UserDefaultsKeys.tailscaleFunnelEnabled:
+                return Defaults.tailscaleFunnelEnabled
             default:
                 return false
             }
@@ -184,7 +193,7 @@ extension AppConstants {
 
     /// Get current dashboard access mode
     static func getDashboardAccessMode() -> DashboardAccessMode {
-        let rawValue = stringValue(for: UserDefaultsKeys.dashboardAccessMode)
+        let rawValue = self.stringValue(for: UserDefaultsKeys.dashboardAccessMode)
         return DashboardAccessMode(rawValue: rawValue) ?? .network
     }
 

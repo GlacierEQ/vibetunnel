@@ -36,7 +36,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'pnpm'
           cache-dependency-path: 'web/pnpm-lock.yaml'
 
@@ -44,6 +44,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libpam0g-dev
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -76,7 +81,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'pnpm'
           cache-dependency-path: 'web/pnpm-lock.yaml'
 
@@ -84,6 +89,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libpam0g-dev
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -119,7 +129,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'pnpm'
           cache-dependency-path: 'web/pnpm-lock.yaml'
 
@@ -128,8 +138,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libpam0g-dev
 
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build zig forwarder
+        run: node scripts/build-fwd-zig.js
 
       - name: Run client tests
         run: pnpm run test:client:coverage
@@ -153,3 +171,18 @@ jobs:
           path: web/coverage/server/
           retention-days: 7
 
+  npm-build:
+    name: Linux npm build (no pnpm)
+    runs-on: blacksmith-8vcpu-ubuntu-2404-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Linux bootstrap (Node + Zig + deps)
+        run: scripts/linux-bootstrap.sh
+
+      - name: Install dependencies (npm)
+        run: npm install --legacy-peer-deps
+
+      - name: Build project (npm)
+        run: npm run build

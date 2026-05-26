@@ -8,8 +8,8 @@ struct TunnelSessionTests {
 
     // Only testing actual logic, not property synthesis
 
-    @Test("updateActivity updates lastActivity timestamp")
-    func updateActivityLogic() async throws {
+    @Test
+    func updateactivityUpdatesLastactivityTimestamp() async throws {
         var session = TunnelSession()
         let originalActivity = session.lastActivity
 
@@ -21,9 +21,9 @@ struct TunnelSessionTests {
         #expect(session.lastActivity > originalActivity)
     }
 
-    @Test("TunnelSession is Codable with all fields")
-    func tunnelSessionCodable() throws {
-        var originalSession = TunnelSession(processID: 67_890)
+    @Test
+    func tunnelsessionIsCodableWithAllFields() throws {
+        var originalSession = TunnelSession(processID: 67890)
         originalSession.updateActivity()
 
         let data = try JSONEncoder().encode(originalSession)
@@ -41,13 +41,12 @@ struct TunnelSessionTests {
 
     // Testing optional field handling in Codable
 
-    @Test("CreateSessionRequest encodes/decodes with all optional fields")
-    func createSessionRequestFullCodable() throws {
+    @Test
+    func createsessionrequestEncodesDecodesWithAllOptionalFields() throws {
         let originalRequest = CreateSessionRequest(
             workingDirectory: "/test/dir",
             environment: ["TEST": "value", "PATH": "/usr/bin"],
-            shell: "/bin/bash"
-        )
+            shell: "/bin/bash")
 
         let data = try JSONEncoder().encode(originalRequest)
         let decodedRequest = try JSONDecoder().decode(CreateSessionRequest.self, from: data)
@@ -57,8 +56,8 @@ struct TunnelSessionTests {
         #expect(originalRequest.shell == decodedRequest.shell)
     }
 
-    @Test("CreateSessionRequest handles empty and nil values correctly")
-    func createSessionRequestEdgeCases() throws {
+    @Test
+    func createsessionrequestHandlesEmptyAndNilValuesCorrectly() throws {
         // Test with empty environment (not nil)
         let requestWithEmpty = CreateSessionRequest(environment: [:])
         let data1 = try JSONEncoder().encode(requestWithEmpty)
@@ -74,13 +73,12 @@ struct TunnelSessionTests {
         #expect(decoded2.shell == nil)
     }
 
-    @Test("CreateSessionRequest handles special characters in paths and environment")
-    func createSessionRequestSpecialCharacters() throws {
+    @Test
+    func createsessionrequestHandlesSpecialCharactersInPathsAndEnvironment() throws {
         let request = CreateSessionRequest(
             workingDirectory: "/path/with spaces/and\"quotes\"",
             environment: ["PATH": "/usr/bin:/usr/local/bin", "HOME": "/home/user with spaces"],
-            shell: "/bin/bash -l"
-        )
+            shell: "/bin/bash -l")
 
         let data = try JSONEncoder().encode(request)
         let decoded = try JSONDecoder().decode(CreateSessionRequest.self, from: data)
@@ -95,12 +93,11 @@ struct TunnelSessionTests {
 
     // Simple type but worth testing Codable with Date precision
 
-    @Test("CreateSessionResponse handles date encoding correctly")
-    func createSessionResponseDateHandling() throws {
+    @Test
+    func createsessionresponseHandlesDateEncodingCorrectly() throws {
         let originalResponse = CreateSessionResponse(
             sessionId: "response-test-456",
-            createdAt: Date()
-        )
+            createdAt: Date())
 
         let data = try JSONEncoder().encode(originalResponse)
         let decodedResponse = try JSONDecoder().decode(CreateSessionResponse.self, from: data)

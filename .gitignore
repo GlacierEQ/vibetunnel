@@ -119,6 +119,12 @@ server/vibetunnel-fwd
 linux/vibetunnel
 *.o
 
+# Zig build artifacts
+native/vt-fwd/.zig-cache/
+native/vt-fwd/zig-out/
+web/bin/vibetunnel-fwd
+web/native/vibetunnel-fwd
+
 
 # Rust build artifacts
 tty-fwd/target/
@@ -166,3 +172,6 @@ mac/build-test/
 /.grok
 /mac/info
 /info
+*.crt
+*.key
+.tmp/

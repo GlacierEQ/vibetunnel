@@ -8,7 +8,7 @@ interface AuthResponse {
   success: boolean;
   token?: string;
   userId?: string;
-  authMethod?: 'ssh-key' | 'password';
+  authMethod?: 'ssh-key' | 'password' | 'tailscale';
   error?: string;
 }
 
@@ -21,7 +21,7 @@ interface Challenge {
 interface User {
   userId: string;
   token: string;
-  authMethod: 'ssh-key' | 'password';
+  authMethod: 'ssh-key' | 'password' | 'tailscale';
   loginTime: number;
 }
 
@@ -90,6 +90,18 @@ export class AuthClient {
   }
 
   /**
+   * Set current user from externally-provided token (e.g. Tailscale auth)
+   */
+  setCurrentUserFromToken(userId: string, token: string, authMethod: User['authMethod']): void {
+    this.setCurrentUser({
+      userId,
+      token,
+      authMethod,
+      loginTime: Date.now(),
+    });
+  }
+
+  /**
    * Get current system user from server
    */
   async getCurrentSystemUser(): Promise<string> {
@@ -135,12 +147,12 @@ export class AuthClient {
       .getPropertyValue('--color-text-dim')
       .trim()
       .split(' ')
-      .map((v) => Number.parseInt(v));
+      .map((v) => Number.parseInt(v, 10));
     const fgColor = computedStyle
       .getPropertyValue('--color-text-muted')
       .trim()
       .split(' ')
-      .map((v) => Number.parseInt(v));
+      .map((v) => Number.parseInt(v, 10));
     const bgColorStr = `rgb(${bgColor.join(', ')})`;
     const fgColorStr = `rgb(${fgColor.join(', ')})`;
 

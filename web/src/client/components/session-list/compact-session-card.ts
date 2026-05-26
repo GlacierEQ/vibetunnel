@@ -2,7 +2,7 @@
  * Compact Session Card Component
  *
  * A compact list item representation of a session for sidebar/compact views.
- * Handles different session states (active, idle, exited) with appropriate styling.
+ * Handles different session states (running, exited) with appropriate styling.
  *
  * @fires session-select - When card is clicked (detail: Session)
  * @fires session-rename - When session is renamed (detail: { sessionId: string, newName: string })
@@ -14,6 +14,7 @@ import { customElement, property } from 'lit/decorators.js';
 import type { Session } from '../../../shared/types.js';
 import { formatSessionDuration } from '../../../shared/utils/time.js';
 import type { AuthClient } from '../../services/auth-client.js';
+import { sessionActionService } from '../../services/session-action-service.js';
 import { formatPathForDisplay } from '../../utils/path-utils.js';
 import '../inline-edit.js';
 
@@ -27,7 +28,7 @@ export class CompactSessionCard extends LitElement {
   @property({ type: Object }) session!: Session;
   @property({ type: Object }) authClient!: AuthClient;
   @property({ type: Boolean }) selected = false;
-  @property({ type: String }) sessionType: 'active' | 'idle' | 'exited' = 'active';
+  @property({ type: String }) sessionType: 'running' | 'exited' = 'running';
   @property({ type: Number }) sessionNumber?: number;
 
   private handleClick() {
@@ -53,14 +54,34 @@ export class CompactSessionCard extends LitElement {
   private async handleDelete(e: Event) {
     e.stopPropagation();
 
-    const eventType = this.session.status === 'exited' ? 'session-cleanup' : 'session-delete';
-    this.dispatchEvent(
-      new CustomEvent(eventType, {
-        detail: { sessionId: this.session.id },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    // Use sessionActionService to perform the actual kill/cleanup
+    await sessionActionService.deleteSession(this.session, {
+      authClient: this.authClient,
+      callbacks: {
+        onSuccess: () => {
+          // Only dispatch the event after successful server-side deletion
+          const eventType = this.session.status === 'exited' ? 'session-cleanup' : 'session-delete';
+          this.dispatchEvent(
+            new CustomEvent(eventType, {
+              detail: { sessionId: this.session.id },
+              bubbles: true,
+              composed: true,
+            })
+          );
+        },
+        onError: (error: string) => {
+          console.error('Failed to delete session:', error);
+          // Dispatch error event
+          this.dispatchEvent(
+            new CustomEvent('session-kill-error', {
+              detail: { sessionId: this.session.id, error },
+              bubbles: true,
+              composed: true,
+            })
+          );
+        },
+      },
+    });
   }
 
   private renderStatusIndicator() {
@@ -70,34 +91,7 @@ export class CompactSessionCard extends LitElement {
       return html`<div class="w-2.5 h-2.5 rounded-full bg-status-warning"></div>`;
     }
 
-    if (session.activityStatus?.isActive === false) {
-      // Idle
-      return html`<div class="w-2.5 h-2.5 rounded-full bg-status-success ring-1 ring-status-success/50"></div>`;
-    }
-
-    // Active
-    return html`
-      <div class="relative">
-        <div
-          class="w-2.5 h-2.5 rounded-full ${
-            session.activityStatus?.specificStatus
-              ? 'bg-status-warning animate-pulse-primary' // Claude active - amber with pulse
-              : 'bg-status-success' // Generic active
-          }"
-          title="${
-            session.activityStatus?.specificStatus
-              ? `Active: ${session.activityStatus.specificStatus.app}`
-              : 'Active'
-          }"
-        ></div>
-        <!-- Pulse ring for active sessions -->
-        ${
-          session.status === 'running' && session.activityStatus?.isActive
-            ? html`<div class="absolute inset-0 w-2.5 h-2.5 rounded-full bg-status-success opacity-30 animate-ping"></div>`
-            : ''
-        }
-      </div>
-    `;
+    return html`<div class="w-2.5 h-2.5 rounded-full bg-status-success"></div>`;
   }
 
   private renderGitChanges() {
@@ -132,7 +126,7 @@ export class CompactSessionCard extends LitElement {
       this.session.name ||
       (Array.isArray(this.session.command) ? this.session.command.join(' ') : this.session.command);
 
-    // Only show inline-edit for active/idle sessions
+    // Only show inline-edit for running sessions
     if (this.sessionType !== 'exited') {
       return html`
         <inline-edit
@@ -244,16 +238,7 @@ export class CompactSessionCard extends LitElement {
             }
           </div>
           
-          <!-- Row 3: Activity status (only shown if there's activity) -->
-          ${
-            this.sessionType === 'active' && session.activityStatus?.specificStatus
-              ? html`
-                <div class="text-xs text-status-warning truncate mt-1">
-                  <span class="flex-shrink-0">${session.activityStatus.specificStatus.status}</span>
-                </div>
-              `
-              : ''
-          }
+          <!-- Row 3: (reserved) -->
         </div>
         
         <!-- Right side: duration and close button -->

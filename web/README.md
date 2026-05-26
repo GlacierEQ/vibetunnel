@@ -97,6 +97,10 @@ Push Notification Options:
 Network Discovery Options:
   --no-mdns             Disable mDNS/Bonjour advertisement (enabled by default)
 
+Tailscale Integration Options:
+  --enable-tailscale-serve    Enable Tailscale Serve integration for HTTPS access
+  --enable-tailscale-funnel   Enable Tailscale Funnel for public internet access
+
 HQ Mode Options:
   --hq                  Run as HQ (headquarters) server
   --no-hq-auth          Disable HQ authentication
@@ -141,7 +145,6 @@ vt -S ls -la
 vt --title-mode none     # No title management
 vt --title-mode filter   # Block all title changes
 vt --title-mode static   # Show directory and command
-vt --title-mode dynamic  # Show directory, command, and activity
 
 # Verbosity control
 vt -q npm test          # Quiet mode (errors only)
@@ -178,6 +181,37 @@ VIBETUNNEL_LOG_LEVEL=debug          # Log level: error, warn, info, verbose, deb
 PUSH_CONTACT_EMAIL=admin@example.com # Contact email for VAPID configuration
 ```
 
+## Tailscale Integration
+
+VibeTunnel supports Tailscale Serve and Funnel for secure remote access:
+
+### Tailscale Serve (Private Access)
+Enable HTTPS access within your Tailnet:
+```bash
+# Start with Tailscale Serve enabled
+vibetunnel --enable-tailscale-serve
+
+# Access via HTTPS within your Tailnet
+https://your-machine-name
+```
+
+**Note**: Mobile browsers may reject Tailscale's self-signed certificates in Private mode. The server will fallback to showing HTTP URLs with IP addresses for mobile access.
+
+### Tailscale Funnel (Public Access)
+Enable public internet access with valid SSL certificates:
+```bash
+# Start with both Serve and Funnel enabled
+vibetunnel --enable-tailscale-serve --enable-tailscale-funnel
+
+# Access from anywhere on the internet
+https://your-machine-name.tail-scale.ts.net
+```
+
+### Requirements
+- Tailscale must be installed and running
+- For Funnel: Your Tailscale account must have Funnel enabled
+- The server automatically configures Tailscale Serve/Funnel on startup
+
 ## Features
 
 - **Web-based terminal interface** - Access terminals from any browser
@@ -206,7 +240,7 @@ This npm package includes:
 - Full VibeTunnel server with web UI
 - Command-line tools (vibetunnel, vt)
 - Native PTY support for terminal emulation
-- Web interface with xterm.js
+- Web interface with ghostty-web
 - Session management and forwarding
 - Built-in systemd service management for Linux
 

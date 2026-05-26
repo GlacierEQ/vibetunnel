@@ -5,9 +5,9 @@ import Testing
 
 @Suite("Cloudflare Service Tests", .tags(.networking))
 struct CloudflareServiceTests {
-    let testPort = 8_888
+    let testPort = 8888
 
-    @Test("Singleton instance")
+    @Test
     @MainActor
     func singletonInstance() {
         let instance1 = CloudflareService.shared
@@ -15,7 +15,7 @@ struct CloudflareServiceTests {
         #expect(instance1 === instance2)
     }
 
-    @Test("Initial state")
+    @Test
     @MainActor
     func initialState() {
         let service = CloudflareService.shared
@@ -31,9 +31,9 @@ struct CloudflareServiceTests {
         }
     }
 
-    @Test("CLI installation check")
+    @Test
     @MainActor
-    func cliInstallationCheck() {
+    func cliInstallationCheck() throws {
         let service = CloudflareService.shared
 
         // This will return true or false depending on whether cloudflared is installed
@@ -46,11 +46,19 @@ struct CloudflareServiceTests {
         // If installed, cloudflaredPath should be set
         if isInstalled {
             #expect(service.cloudflaredPath != nil)
-            #expect(!service.cloudflaredPath!.isEmpty)
+            let cloudflaredPath = try #require(service.cloudflaredPath)
+            #expect(!cloudflaredPath.isEmpty)
         }
     }
 
-    @Test("Status check when not installed")
+    @Test
+    @MainActor
+    func cloudflaredSearchPathsIncludeNixProfile() {
+        let expectedPath = "/etc/profiles/per-user/\(NSUserName())/bin/cloudflared"
+        #expect(CloudflareService.cloudflaredSearchPaths.contains(expectedPath))
+    }
+
+    @Test
     @MainActor
     func statusCheckWhenNotInstalled() async {
         let service = CloudflareService.shared
@@ -65,15 +73,15 @@ struct CloudflareServiceTests {
         }
     }
 
-    @Test("Start tunnel without installation fails")
+    @Test
     @MainActor
-    func startTunnelWithoutInstallation() async throws {
+    func startTunnelWithoutInstallationFails() async throws {
         let service = CloudflareService.shared
 
         // If cloudflared is not installed, starting should fail
         if !service.isInstalled {
             do {
-                try await service.startQuickTunnel(port: testPort)
+                try await service.startQuickTunnel(port: self.testPort)
                 Issue.record("Expected error to be thrown")
             } catch let error as CloudflareError {
                 #expect(error == .notInstalled)
@@ -83,9 +91,9 @@ struct CloudflareServiceTests {
         }
     }
 
-    @Test("Start tunnel when already running fails")
+    @Test
     @MainActor
-    func startTunnelWhenAlreadyRunning() async throws {
+    func startTunnelWhenAlreadyRunningFails() async throws {
         let service = CloudflareService.shared
 
         // Skip if not installed
@@ -96,7 +104,7 @@ struct CloudflareServiceTests {
         // If tunnel is already running, starting again should fail
         if service.isRunning {
             do {
-                try await service.startQuickTunnel(port: testPort)
+                try await service.startQuickTunnel(port: self.testPort)
                 Issue.record("Expected error to be thrown")
             } catch let error as CloudflareError {
                 #expect(error == .tunnelAlreadyRunning)
@@ -106,7 +114,7 @@ struct CloudflareServiceTests {
         }
     }
 
-    @Test("Stop tunnel when not running")
+    @Test
     @MainActor
     func stopTunnelWhenNotRunning() async {
         let service = CloudflareService.shared
@@ -125,7 +133,7 @@ struct CloudflareServiceTests {
         #expect(service.publicUrl == nil)
     }
 
-    @Test("URL extraction from output")
+    @Test
     @MainActor
     func urlExtractionFromOutput() {
         // Test URL extraction with sample cloudflared output
@@ -134,7 +142,7 @@ struct CloudflareServiceTests {
             "2024-01-01 12:00:00 INF https://another-test.trycloudflare.com",
             "Tunnel URL: https://third-test.trycloudflare.com",
             "No URL in this output",
-            "https://invalid-domain.com should not match"
+            "https://invalid-domain.com should not match",
         ]
 
         // This test verifies the URL extraction logic indirectly
@@ -146,21 +154,21 @@ struct CloudflareServiceTests {
             let range = NSRange(location: 0, length: output.count)
             let matches = regex?.matches(in: output, options: [], range: range)
 
-            if output.contains("trycloudflare.com") && !output.contains("invalid-domain") {
+            if output.contains("trycloudflare.com"), !output.contains("invalid-domain") {
                 #expect(matches?.count == 1)
             }
         }
     }
 
-    @Test("CloudflareError descriptions")
-    func cloudflareErrorDescriptions() {
+    @Test
+    func cloudflareerrorDescriptions() {
         let errors: [CloudflareError] = [
             .notInstalled,
             .tunnelAlreadyRunning,
             .tunnelCreationFailed("test error"),
             .networkError("connection failed"),
             .invalidOutput,
-            .processTerminated
+            .processTerminated,
         ]
 
         for error in errors {
@@ -171,8 +179,8 @@ struct CloudflareServiceTests {
         }
     }
 
-    @Test("CloudflareError equality")
-    func cloudflareErrorEquality() {
+    @Test
+    func cloudflareerrorEquality() {
         #expect(CloudflareError.notInstalled == CloudflareError.notInstalled)
         #expect(CloudflareError.tunnelAlreadyRunning == CloudflareError.tunnelAlreadyRunning)
         #expect(CloudflareError.tunnelCreationFailed("a") == CloudflareError.tunnelCreationFailed("a"))
@@ -181,7 +189,7 @@ struct CloudflareServiceTests {
         #expect(CloudflareError.networkError("a") != CloudflareError.networkError("b"))
     }
 
-    @Test("Installation method URLs")
+    @Test
     @MainActor
     func installationMethodUrls() {
         let service = CloudflareService.shared
@@ -205,7 +213,7 @@ struct CloudflareServiceTests {
         #expect(Bool(true))
     }
 
-    @Test("Service state consistency")
+    @Test
     @MainActor
     func serviceStateConsistency() async {
         let service = CloudflareService.shared
@@ -229,7 +237,7 @@ struct CloudflareServiceTests {
         }
     }
 
-    @Test("Concurrent status checks")
+    @Test
     @MainActor
     func concurrentStatusChecks() async {
         let service = CloudflareService.shared
@@ -248,7 +256,7 @@ struct CloudflareServiceTests {
         #expect(finalState == service.isRunning) // Should be consistent
     }
 
-    @Test("Status error handling")
+    @Test
     @MainActor
     func statusErrorHandling() async {
         let service = CloudflareService.shared

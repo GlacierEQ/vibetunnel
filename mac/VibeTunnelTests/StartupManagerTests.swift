@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Startup Manager Tests")
 struct StartupManagerTests {
-    @Test("Create instance")
+    @Test
     @MainActor
     func createInstance() {
         let manager = StartupManager()
@@ -13,7 +13,7 @@ struct StartupManagerTests {
         #expect(manager.isLaunchAtLoginEnabled == true || manager.isLaunchAtLoginEnabled == false)
     }
 
-    @Test("Initial launch at login state")
+    @Test
     @MainActor
     func initialLaunchAtLoginState() {
         let manager = StartupManager()
@@ -24,7 +24,7 @@ struct StartupManagerTests {
         #expect(state == true || state == false)
     }
 
-    @Test("Set launch at login")
+    @Test
     @MainActor
     func setLaunchAtLogin() {
         let manager = StartupManager()
@@ -40,7 +40,7 @@ struct StartupManagerTests {
         #expect(true)
     }
 
-    @Test("Service management availability")
+    @Test
     @available(macOS 13.0, *)
     func serviceManagementAvailability() {
         // Test that we can at least query the service status
@@ -54,7 +54,7 @@ struct StartupManagerTests {
         #expect(status.rawValue >= 0)
     }
 
-    @Test("App bundle identifier")
+    @Test
     func appBundleIdentifier() {
         // In test environment, bundle identifier might be nil
         let bundleId = Bundle.main.bundleIdentifier
@@ -70,7 +70,7 @@ struct StartupManagerTests {
         }
     }
 
-    @Test("Multiple operations")
+    @Test
     @MainActor
     func multipleOperations() {
         let manager = StartupManager()

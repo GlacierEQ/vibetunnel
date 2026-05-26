@@ -10,7 +10,7 @@ struct APIClientTests {
     init() {
         // Set up mock URLSession
         let configuration = URLSessionConfiguration.mockConfiguration
-        mockSession = URLSession(configuration: configuration)
+        self.mockSession = URLSession(configuration: configuration)
     }
 
     // MARK: - Session Management Tests
@@ -28,7 +28,7 @@ struct APIClientTests {
         }
 
         // Act
-        let client = createTestClient()
+        let client = self.createTestClient()
         let sessions = try await client.getSessions()
 
         // Assert
@@ -49,7 +49,7 @@ struct APIClientTests {
         }
 
         // Act
-        let client = createTestClient()
+        let client = self.createTestClient()
         let sessions = try await client.getSessions()
 
         // Assert
@@ -65,7 +65,7 @@ struct APIClientTests {
         }
 
         // Act & Assert
-        let client = createTestClient()
+        let client = self.createTestClient()
         do {
             _ = try await client.getSessions()
             Issue.record("Expected network error")
@@ -88,8 +88,7 @@ struct APIClientTests {
             workingDir: "/Users/test",
             name: "Test Session",
             cols: 80,
-            rows: 24
-        )
+            rows: 24)
 
         MockURLProtocol.requestHandler = { request in
             #expect(request.url?.path == "/api/sessions")
@@ -98,15 +97,15 @@ struct APIClientTests {
 
             // Verify request body
             if let body = request.httpBody,
-               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+               let decoded = try? JSONDecoder().decode(SessionCreateData.self, from: body)
             {
-                #expect(json["command"] as? String == "/bin/bash")
-                #expect(json["workingDir"] as? String == "/Users/test")
-                #expect(json["name"] as? String == "Test Session")
-                #expect(json["cols"] as? Int == 80)
-                #expect(json["rows"] as? Int == 24)
+                #expect(decoded.command == ["/bin/bash"])
+                #expect(decoded.workingDir == "/Users/test")
+                #expect(decoded.name == "Test Session")
+                #expect(decoded.cols == 80)
+                #expect(decoded.rows == 24)
             } else {
-                Issue.record("Failed to parse request body")
+                Issue.record("Failed to decode request body")
             }
 
             let responseData = TestFixtures.createSessionJSON.data(using: .utf8)!
@@ -114,7 +113,7 @@ struct APIClientTests {
         }
 
         // Act
-        let client = createTestClient()
+        let client = self.createTestClient()
         let sessionId = try await client.createSession(sessionData)
 
         // Assert
@@ -135,7 +134,7 @@ struct APIClientTests {
         }
 
         // Act & Assert (should not throw)
-        let client = createTestClient()
+        let client = self.createTestClient()
         try await client.killSession(sessionId)
     }
 
@@ -150,19 +149,23 @@ struct APIClientTests {
             #expect(request.url?.path == "/api/sessions/\(sessionId)/input")
             #expect(request.httpMethod == "POST")
 
+            struct InputPayload: Decodable {
+                let data: String
+            }
+
             if let body = request.httpBody,
-               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+               let decoded = try? JSONDecoder().decode(InputPayload.self, from: body)
             {
-                #expect(json["data"] as? String == inputText)
+                #expect(decoded.data == inputText)
             } else {
-                Issue.record("Failed to parse input request body")
+                Issue.record("Failed to decode input request body")
             }
 
             return MockURLProtocol.successResponse(for: request.url!, statusCode: 204)
         }
 
         // Act & Assert (should not throw)
-        let client = createTestClient()
+        let client = self.createTestClient()
         try await client.sendInput(sessionId: sessionId, text: inputText)
     }
 
@@ -178,20 +181,25 @@ struct APIClientTests {
             #expect(request.url?.path == "/api/sessions/\(sessionId)/resize")
             #expect(request.httpMethod == "POST")
 
+            struct ResizePayload: Decodable {
+                let cols: Int
+                let rows: Int
+            }
+
             if let body = request.httpBody,
-               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+               let decoded = try? JSONDecoder().decode(ResizePayload.self, from: body)
             {
-                #expect(json["cols"] as? Int == cols)
-                #expect(json["rows"] as? Int == rows)
+                #expect(decoded.cols == cols)
+                #expect(decoded.rows == rows)
             } else {
-                Issue.record("Failed to parse resize request body")
+                Issue.record("Failed to decode resize request body")
             }
 
             return MockURLProtocol.successResponse(for: request.url!, statusCode: 204)
         }
 
         // Act & Assert (should not throw)
-        let client = createTestClient()
+        let client = self.createTestClient()
         try await client.resizeTerminal(sessionId: sessionId, cols: cols, rows: rows)
     }
 
@@ -206,17 +214,16 @@ struct APIClientTests {
             return MockURLProtocol.errorResponse(
                 for: request.url!,
                 statusCode: 404,
-                message: "Session not found"
-            )
+                message: "Session not found")
         }
 
         // Act & Assert
-        let client = createTestClient()
+        let client = self.createTestClient()
         do {
             _ = try await client.getSession("nonexistent")
             Issue.record("Expected error to be thrown")
         } catch let error as APIError {
-            guard case .serverError(let code, let message) = error else {
+            guard case let .serverError(code, message) = error else {
                 Issue.record("Expected server error, got \(error)")
                 return
             }
@@ -236,12 +243,12 @@ struct APIClientTests {
         }
 
         // Act & Assert
-        let client = createTestClient()
+        let client = self.createTestClient()
         do {
             _ = try await client.getSessions()
             Issue.record("Expected error to be thrown")
         } catch let error as APIError {
-            guard case .serverError(let code, _) = error else {
+            guard case let .serverError(code, _) = error else {
                 Issue.record("Expected server error, got \(error)")
                 return
             }
@@ -261,7 +268,7 @@ struct APIClientTests {
         }
 
         // Act & Assert
-        let client = createTestClient()
+        let client = self.createTestClient()
         do {
             _ = try await client.getSessions()
             Issue.record("Expected decoding error")
@@ -284,7 +291,7 @@ struct APIClientTests {
         }
 
         // Act & Assert
-        let client = createTestClient()
+        let client = self.createTestClient()
         do {
             _ = try await client.getSessions()
             Issue.record("Expected network error")
@@ -310,7 +317,7 @@ struct APIClientTests {
         }
 
         // Act
-        let client = createTestClient()
+        let client = self.createTestClient()
         let isHealthy = try await client.checkHealth()
 
         // Assert
@@ -326,7 +333,7 @@ struct APIClientTests {
         }
 
         // Act
-        let client = createTestClient()
+        let client = self.createTestClient()
         let isHealthy = try await client.checkHealth()
 
         // Assert

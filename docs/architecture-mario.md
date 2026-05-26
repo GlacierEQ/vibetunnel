@@ -6,7 +6,7 @@ This document contains comprehensive technical insights from Mario's debugging s
 
 Mario identified two critical issues causing performance problems in VibeTunnel:
 
-1. **850MB Session Bug**: External terminal sessions (via `fwd.ts`) bypass the clear sequence truncation in `stream-watcher.ts`, sending entire gigabyte files instead of the last 2MB
+1. **850MB Session Bug**: External terminal sessions (via `vibetunnel-fwd`) bypass the clear sequence truncation in `stream-watcher.ts`, sending entire gigabyte files instead of the last 2MB
 2. **Resize Loop**: Claude terminal app issues full clear sequence (`\x1b[2J`) and re-renders entire scroll buffer on every resize event, creating exponential data growth
 
 Note: A third issue with Node-PTY's shared pipe architecture causing Electron crashes has already been resolved with a custom PTY implementation.
@@ -35,7 +35,7 @@ sequenceDiagram
     participant WS as WebSocket
     participant Server as Node Server
     participant PTY as PTYManager
-    participant FWD as fwd.ts
+    participant FWD as vibetunnel-fwd
     participant Proc as User Process
     
     UI->>WS: keystrokes
@@ -47,7 +47,7 @@ sequenceDiagram
     alt External Terminal
         FWD-->>TTY: mirror stdout to terminal
     end
-    Server-->>UI: SSE stream (truncated)
+    Server-->>UI: WS v3 stream (truncated + multiplexed)
 ```
 
 ### Key Files and Their Roles
@@ -57,14 +57,14 @@ sequenceDiagram
 | `server.ts` | Main web server | HTTP endpoints, WebSocket handling |
 | `pty-manager.ts` | PTY lifecycle management | `createSession()`, `setupPtyHandlers()` |
 | `stream-watcher.ts` | Monitors ascinema files | `sendExistingContent()` - implements clear truncation |
-| `fwd.ts` | External terminal forwarding | Process spawning, **BYPASSES TRUNCATION** |
+| `vibetunnel-fwd` | External terminal forwarding | Process spawning, **BYPASSES TRUNCATION** |
 | `terminal-manager.ts` | Binary buffer rendering | Converts ANSI to binary cells format |
 
 ### Data Flow Paths
 
 #### Input Path (Keystroke → Terminal)
 1. Browser captures key press
-2. WebSocket sends to `/api/sessions/:id/input`
+2. WebSocket v3 sends to `/ws` (`INPUT_TEXT`/`INPUT_KEY`/`RESIZE`)
 3. Server writes to IPC socket
 4. PTY Manager writes to process stdin
 5. Process executes command
@@ -72,12 +72,11 @@ sequenceDiagram
 #### Output Path (Terminal → Browser)
 1. Process writes to stdout
 2. PTY Manager captures via `onData` handler
-3. Writes to ascinema file (with write queue for backpressure)
-4. Stream watcher monitors file changes
-5. For existing content: **scans for last clear sequence**
-6. Client receives via:
-   - SSE: `/api/sessions/:id/stream` (text/ascinema format)
-   - WebSocket: `/buffers` (binary cell format)
+3. Writes to asciinema cast file (with write queue for backpressure)
+4. CastOutputHub tails file + scans for last clear sequence (pruning)
+5. Client receives via `/ws` v3:
+   - `STDOUT` (UTF-8 bytes)
+   - `SNAPSHOT_VT` (server-rendered VT snapshot bytes)
 
 ### Binary Cell Buffer Format
 
@@ -103,7 +102,7 @@ Benefits:
 
 **Symptom**: Sessions with large output (850MB+) cause infinite loading and browser unresponsiveness.
 
-**Root Cause**: External terminal sessions via `fwd.ts` bypass the clear sequence truncation logic.
+**Root Cause**: External terminal sessions via `vibetunnel-fwd` bypass the clear sequence truncation logic.
 
 **Technical Details**:
 ```javascript
@@ -186,7 +185,7 @@ function findLastClearSequence(buffer) {
 **Problem**: External terminal sessions don't use `sendExistingContent()` truncation.
 
 **Investigation Needed**:
-1. Trace how `fwd.ts` connects to client streams
+1. Trace how `vibetunnel-fwd` connects to client streams
 2. Determine why it bypasses stream-watcher's truncation
 3. Ensure external terminals use same code path as server sessions
 4. Test with 980MB file to verify fix
@@ -306,9 +305,9 @@ window.addEventListener('resize', () => {
 ```
 
 ### Monitor Network Traffic
-- Check `/api/sessions/:id/stream` response size
-- Verify only sends data after last clear
-- Monitor WebSocket `/buffers` for binary updates
+- Check `/ws` traffic (v3 frames) for `STDOUT` and `SNAPSHOT_VT`
+- Verify pruning works (no replay before last clear)
+- Use `/api/sessions/:id/snapshot` for snapshot/export debugging
 
 ## Architectural Insights
 
@@ -342,7 +341,7 @@ window.addEventListener('resize', () => {
 ## Action Plan Summary
 
 1. **Immediate (End of Week)**: Fix external terminal truncation bug
-   - Debug why `fwd.ts` bypasses `sendExistingContent()`
+   - Debug why `vibetunnel-fwd` bypasses `sendExistingContent()`
    - Deploy fix for immediate user relief
 
 2. **Short Term**: Comprehensive resize fix

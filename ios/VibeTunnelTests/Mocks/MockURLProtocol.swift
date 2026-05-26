@@ -1,4 +1,5 @@
 import Foundation
+@testable import VibeTunnel
 
 /// Mock URLProtocol for intercepting and stubbing network requests in tests
 class MockURLProtocol: URLProtocol {
@@ -44,44 +45,47 @@ extension MockURLProtocol {
         for url: URL,
         statusCode: Int = 200,
         data: Data? = nil,
-        headers: [String: String] = [:]
-    )
+        headers: [String: String] = [:])
         -> (HTTPURLResponse, Data?)
     {
         let response = HTTPURLResponse(
             url: url,
             statusCode: statusCode,
             httpVersion: "HTTP/1.1",
-            headerFields: headers
-        )!
+            headerFields: headers)!
         return (response, data)
     }
 
     static func jsonResponse(
         for url: URL,
         statusCode: Int = 200,
-        json: Any
-    )
+        json: Any)
         throws -> (HTTPURLResponse, Data?)
     {
-        let data = try JSONSerialization.data(withJSONObject: json)
+        let data = try self.encodeJSON(json)
         let headers = ["Content-Type": "application/json"]
-        return successResponse(for: url, statusCode: statusCode, data: data, headers: headers)
+        return self.successResponse(for: url, statusCode: statusCode, data: data, headers: headers)
     }
 
     static func errorResponse(
         for url: URL,
         statusCode: Int,
-        message: String? = nil
-    )
+        message: String? = nil)
         -> (HTTPURLResponse, Data?)
     {
         var data: Data?
         if let message {
             let json = ["error": message]
-            data = try? JSONSerialization.data(withJSONObject: json)
+            data = try? self.encodeJSON(json)
         }
-        return successResponse(for: url, statusCode: statusCode, data: data)
+        return self.successResponse(for: url, statusCode: statusCode, data: data)
+    }
+
+    private static func encodeJSON(_ json: Any) throws -> Data {
+        guard let value = JSONValue(any: json) else {
+            throw URLError(.cannotParseResponse)
+        }
+        return try JSONEncoder().encode(value)
     }
 }
 

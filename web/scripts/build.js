@@ -22,7 +22,7 @@ async function build() {
 
   // Build CSS
   console.log('Building CSS...');
-  execSync('pnpm exec postcss ./src/client/styles.css -o ./public/bundle/styles.css', { stdio: 'inherit' });
+  execSync('npx --no-install postcss ./src/client/styles.css -o ./public/bundle/styles.css', { stdio: 'inherit' });
 
   // Bundle client JavaScript
   console.log('Bundling client JavaScript...');
@@ -78,6 +78,7 @@ async function build() {
         'compression',
         'helmet',
         'express',
+        'ghostty-web',
         'ws',
         'jsonwebtoken',
         'web-push',
@@ -86,7 +87,6 @@ async function build() {
         'http-proxy-middleware',
         'multer',
         'mime-types',
-        '@xterm/headless',
       ],
       minify: true,
       sourcemap: false,
@@ -116,6 +116,23 @@ async function build() {
     process.exit(1);
   }
 
+  // Build zig forwarder first.
+  // `build-native.js` runs verification in CI which expects the forwarder to exist.
+  console.log('Building zig forwarder...');
+  execSync('node scripts/build-fwd-zig.js', { stdio: 'inherit' });
+
+
+  const shouldBuildSea =
+    process.env.VIBETUNNEL_BUILD_SEA === '1' ||
+    process.env.VIBETUNNEL_SEA === '1' ||
+    process.env.VIBETUNNEL_SEA === 'true' ||
+    process.argv.includes('--build-sea');
+  const isLinux = process.platform === 'linux';
+  if (isLinux && !shouldBuildSea) {
+    console.log('Skipping native SEA build on Linux (set VIBETUNNEL_BUILD_SEA=1 or --build-sea to override).');
+    console.log('Build completed successfully!');
+    return;
+  }
 
   // Build native executable
   console.log('Building native executable...');

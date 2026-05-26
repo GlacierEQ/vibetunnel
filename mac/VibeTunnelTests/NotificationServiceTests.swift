@@ -4,9 +4,9 @@ import UserNotifications
 
 @Suite("NotificationService Tests")
 struct NotificationServiceTests {
-    @Test("Notification preferences are loaded correctly from ConfigManager")
+    @Test
     @MainActor
-    func loadPreferencesFromConfig() {
+    func notificationPreferencesAreLoadedCorrectlyFromConfigmanager() {
         // This test verifies that NotificationPreferences correctly loads values from ConfigManager
         let configManager = ConfigManager.shared
         let preferences = NotificationService.NotificationPreferences(fromConfig: configManager)
@@ -17,20 +17,19 @@ struct NotificationServiceTests {
         #expect(preferences.commandCompletion == configManager.notificationCommandCompletion)
         #expect(preferences.commandError == configManager.notificationCommandError)
         #expect(preferences.bell == configManager.notificationBell)
-        #expect(preferences.claudeTurn == configManager.notificationClaudeTurn)
         #expect(preferences.soundEnabled == configManager.notificationSoundEnabled)
         #expect(preferences.vibrationEnabled == configManager.notificationVibrationEnabled)
     }
 
-    @Test("Default notification values match expected defaults")
+    @Test
     @MainActor
-    func verifyDefaultValues() {
+    func defaultNotificationValuesMatchExpectedDefaults() {
         // This test documents what the default values SHOULD be
         // In production, these would be set when no config file exists
 
         // Expected defaults based on TypeScript config:
         // - Master switch (notificationsEnabled) should be false
-        // - Individual preferences should be true (except claudeTurn)
+        // - Individual preferences should be true
         // - Sound and vibration should be enabled
 
         // Note: In actual tests, ConfigManager loads from ~/.vibetunnel/config.json
@@ -46,7 +45,6 @@ struct NotificationServiceTests {
         let expectedCommandCompletion = true
         let expectedCommandError = true
         let expectedBell = true
-        let expectedClaudeTurn = false
         let expectedSound = true
         let expectedVibration = true
 
@@ -57,14 +55,13 @@ struct NotificationServiceTests {
         #expect(expectedCommandCompletion == true, "Command completion should be enabled by default")
         #expect(expectedCommandError == true, "Command error should be enabled by default")
         #expect(expectedBell == true, "Bell should be enabled by default")
-        #expect(expectedClaudeTurn == false, "Claude turn should be disabled by default")
         #expect(expectedSound == true, "Sound should be enabled by default")
         #expect(expectedVibration == true, "Vibration should be enabled by default")
     }
 
-    @Test("Notification preferences can be updated")
+    @Test
     @MainActor
-    func testUpdatePreferences() {
+    func notificationPreferencesCanBeUpdated() {
         let service = NotificationService.shared
         let configManager = ConfigManager.shared
 
@@ -81,9 +78,9 @@ struct NotificationServiceTests {
         #expect(configManager.notificationBell == true)
     }
 
-    @Test("Session start notification is sent when enabled")
+    @Test
     @MainActor
-    func sessionStartNotification() async throws {
+    func sessionStartNotificationIsSentWhenEnabled() async {
         let service = NotificationService.shared
         let configManager = ConfigManager.shared
 
@@ -97,7 +94,7 @@ struct NotificationServiceTests {
 
         // Send session start notification
         let sessionName = "Test Session"
-        await service.sendSessionStartNotification(sessionName: sessionName)
+        await service.sendNotification(for: .sessionStart(sessionId: "test-session", sessionName: sessionName))
 
         // Verify notification would be created (actual delivery depends on system permissions)
         // In a real test environment, we'd mock UNUserNotificationCenter
@@ -105,9 +102,9 @@ struct NotificationServiceTests {
         #expect(preferences.sessionStart == true)
     }
 
-    @Test("Session exit notification includes exit code")
+    @Test
     @MainActor
-    func sessionExitNotification() async throws {
+    func sessionExitNotificationIncludesExitCode() async {
         let service = NotificationService.shared
         let configManager = ConfigManager.shared
 
@@ -120,18 +117,26 @@ struct NotificationServiceTests {
         service.updatePreferences(preferences)
 
         // Test successful exit
-        await service.sendSessionExitNotification(sessionName: "Test Session", exitCode: 0)
+        await service.sendNotification(
+            for: .sessionExit(
+                sessionId: "test-session",
+                sessionName: "Test Session",
+                exitCode: 0))
 
         // Test error exit
-        await service.sendSessionExitNotification(sessionName: "Failed Session", exitCode: 1)
+        await service.sendNotification(
+            for: .sessionExit(
+                sessionId: "test-session",
+                sessionName: "Failed Session",
+                exitCode: 1))
 
         #expect(configManager.notificationsEnabled == true)
         #expect(preferences.sessionExit == true)
     }
 
-    @Test("Command completion notification respects duration threshold")
+    @Test
     @MainActor
-    func commandCompletionNotification() async throws {
+    func commandCompletionNotificationRespectsDurationThreshold() async {
         let service = NotificationService.shared
         let configManager = ConfigManager.shared
 
@@ -144,24 +149,26 @@ struct NotificationServiceTests {
         service.updatePreferences(preferences)
 
         // Test short duration
-        await service.sendCommandCompletionNotification(
-            command: "ls",
-            duration: 1_000 // 1 second
-        )
+        await service.sendNotification(
+            for: .commandFinished(
+                sessionId: "test-session",
+                command: "ls",
+                duration: 1000))
 
         // Test long duration
-        await service.sendCommandCompletionNotification(
-            command: "long-running-command",
-            duration: 5_000 // 5 seconds
-        )
+        await service.sendNotification(
+            for: .commandFinished(
+                sessionId: "test-session",
+                command: "long-running-command",
+                duration: 5000))
 
         #expect(configManager.notificationsEnabled == true)
         #expect(preferences.commandCompletion == true)
     }
 
-    @Test("Command error notification is sent for non-zero exit codes")
+    @Test
     @MainActor
-    func commandErrorNotification() async throws {
+    func commandErrorNotificationIsSentForNonZeroExitCodes() async {
         let service = NotificationService.shared
         let configManager = ConfigManager.shared
 
@@ -174,20 +181,20 @@ struct NotificationServiceTests {
         service.updatePreferences(preferences)
 
         // Test command with error
-        // Note: The service handles command errors through the event stream,
-        // not through direct method calls
-        await service.sendCommandCompletionNotification(
-            command: "failing-command",
-            duration: 1_000
-        )
+        await service.sendNotification(
+            for: .commandError(
+                sessionId: "test-session",
+                command: "failing-command",
+                exitCode: 1,
+                duration: 1000))
 
         #expect(configManager.notificationsEnabled == true)
         #expect(preferences.commandError == true)
     }
 
-    @Test("Bell notification is sent when enabled")
+    @Test
     @MainActor
-    func bellNotification() async throws {
+    func bellNotificationIsSentWhenEnabled() async {
         let service = NotificationService.shared
         let configManager = ConfigManager.shared
 
@@ -200,16 +207,15 @@ struct NotificationServiceTests {
         service.updatePreferences(preferences)
 
         // Send bell notification
-        // Note: Bell notifications are handled through the event stream
-        await service.sendGenericNotification(title: "Terminal Bell", body: "Test Session")
+        await service.sendNotification(for: .bell(sessionId: "test-session"))
 
         #expect(configManager.notificationsEnabled == true)
         #expect(preferences.bell == true)
     }
 
-    @Test("Notifications are not sent when disabled")
+    @Test
     @MainActor
-    func disabledNotifications() async throws {
+    func notificationsAreNotSentWhenDisabled() async {
         let service = NotificationService.shared
         let configManager = ConfigManager.shared
 
@@ -226,13 +232,19 @@ struct NotificationServiceTests {
         service.updatePreferences(preferences)
 
         // Try to send various notifications
-        await service.sendSessionStartNotification(sessionName: "Test")
-        await service.sendSessionExitNotification(sessionName: "Test", exitCode: 0)
-        await service.sendCommandCompletionNotification(
-            command: "test",
-            duration: 5_000
-        )
-        await service.sendGenericNotification(title: "Bell", body: "Test")
+        await service.sendNotification(
+            for: .sessionStart(sessionId: "test-session", sessionName: "Test"))
+        await service.sendNotification(
+            for: .sessionExit(
+                sessionId: "test-session",
+                sessionName: "Test",
+                exitCode: 0))
+        await service.sendNotification(
+            for: .commandFinished(
+                sessionId: "test-session",
+                command: "test",
+                duration: 5000))
+        await service.sendNotification(for: .bell(sessionId: "test-session"))
 
         // Master switch should block all notifications
         #expect(configManager.notificationsEnabled == false)
@@ -248,8 +260,13 @@ struct NotificationServiceTests {
         service.updatePreferences(preferences)
 
         // Try to send notifications again
-        await service.sendSessionStartNotification(sessionName: "Test")
-        await service.sendSessionExitNotification(sessionName: "Test", exitCode: 0)
+        await service.sendNotification(
+            for: .sessionStart(sessionId: "test-session", sessionName: "Test"))
+        await service.sendNotification(
+            for: .sessionExit(
+                sessionId: "test-session",
+                sessionName: "Test",
+                exitCode: 0))
 
         // Individual preferences should block notifications
         #expect(preferences.sessionStart == false)
@@ -258,9 +275,9 @@ struct NotificationServiceTests {
         #expect(preferences.bell == false)
     }
 
-    @Test("Service handles missing session names gracefully")
+    @Test
     @MainActor
-    func missingSessionNames() async throws {
+    func serviceHandlesMissingSessionNamesGracefully() async {
         let service = NotificationService.shared
         let configManager = ConfigManager.shared
 
@@ -272,7 +289,11 @@ struct NotificationServiceTests {
         service.updatePreferences(preferences)
 
         // Send notification with empty name
-        await service.sendSessionExitNotification(sessionName: "", exitCode: 0)
+        await service.sendNotification(
+            for: .sessionExit(
+                sessionId: "test-session",
+                sessionName: "",
+                exitCode: 0))
 
         // Should handle gracefully
         #expect(configManager.notificationsEnabled == true)

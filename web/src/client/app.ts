@@ -1,11 +1,6 @@
 // Install crypto polyfill first - must be before any code that uses crypto.randomUUID()
 import './utils/crypto-polyfill.js';
 
-// Suppress xterm.js errors globally - must be before any other imports
-import { suppressXtermErrors } from '../shared/suppress-xterm-errors.js';
-
-suppressXtermErrors();
-
 import { html, LitElement } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { keyed } from 'lit/directives/keyed.js';
@@ -36,14 +31,11 @@ import './components/settings.js';
 import './components/notification-status.js';
 import './components/auth-login.js';
 import './components/ssh-key-manager.js';
-import './components/git-notification-handler.js';
-import type { GitNotificationHandler } from './components/git-notification-handler.js';
 
 import { authClient } from './services/auth-client.js';
-import { bufferSubscriptionService } from './services/buffer-subscription-service.js';
-import { getControlEventService } from './services/control-event-service.js';
-import { notificationEventService } from './services/notification-event-service.js';
 import { pushNotificationService } from './services/push-notification-service.js';
+import { serverEventService } from './services/server-event-service.js';
+import { terminalSocketClient } from './services/terminal-socket-client.js';
 
 const logger = createLogger('app');
 
@@ -84,6 +76,8 @@ export class VibeTunnelApp extends LitElement {
   private responsiveObserverInitialized = false;
   private initialRenderComplete = false;
   private sidebarAnimationReady = false;
+  private sidebarScrollElement: HTMLElement | null = null;
+  private sidebarTouchStartY = 0;
   // Session caching to reduce re-renders
   private _cachedSelectedSession: Session | undefined;
   private _cachedSelectedSessionId: string | null = null;
@@ -96,7 +90,19 @@ export class VibeTunnelApp extends LitElement {
   private responsiveUnsubscribe?: () => void;
   private resizeCleanupFunctions: (() => void)[] = [];
   private sessionLoadingState: 'idle' | 'loading' | 'loaded' | 'not-found' = 'idle';
-  private controlEventService?: ReturnType<typeof getControlEventService>;
+
+  private isTestEnvironment(): boolean {
+    return (
+      (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') ||
+      window.location.search.includes('test=true') ||
+      navigator.userAgent.includes('HeadlessChrome') ||
+      navigator.userAgent.includes('Headless') ||
+      (window as unknown as { __playwright?: unknown }).__playwright !== undefined ||
+      navigator.userAgent.includes('Playwright') ||
+      navigator.webdriver === true ||
+      window.location.port === '4022'
+    );
+  }
 
   connectedCallback() {
     super.connectedCallback();
@@ -104,7 +110,6 @@ export class VibeTunnelApp extends LitElement {
     this.setupKeyboardShortcuts();
     this.setupNotificationHandlers();
     this.setupResponsiveObserver();
-    this.setupPreferences();
     // Initialize title updater
     titleManager.initAutoUpdates();
     // Listen for keyboard capture toggle events from input manager
@@ -114,16 +119,6 @@ export class VibeTunnelApp extends LitElement {
   }
 
   firstUpdated() {
-    // Connect control event service to git notification handler
-    if (this.controlEventService) {
-      const gitNotificationHandler = this.querySelector(
-        'git-notification-handler'
-      ) as GitNotificationHandler;
-      if (gitNotificationHandler) {
-        gitNotificationHandler.setControlEventService(this.controlEventService);
-      }
-    }
-
     // Mark initial render as complete after a microtask to ensure DOM is settled
     Promise.resolve().then(() => {
       this.initialRenderComplete = true;
@@ -159,6 +154,16 @@ export class VibeTunnelApp extends LitElement {
         document.body.classList.remove('in-session-view');
       }
     }
+
+    // Re-bind sidebar scroll lock when relevant state changes
+    if (
+      changedProperties.has('currentView') ||
+      changedProperties.has('sidebarCollapsed') ||
+      changedProperties.has('mediaState') ||
+      changedProperties.has('sessions')
+    ) {
+      queueMicrotask(() => this.setupSidebarScrollLock());
+    }
   }
 
   disconnectedCallback() {
@@ -183,6 +188,7 @@ export class VibeTunnelApp extends LitElement {
     }
     // Clean up any active resize listeners
     this.cleanupResizeListeners();
+    this.teardownSidebarScrollLock();
   }
 
   private handleKeyDown = (e: KeyboardEvent) => {
@@ -198,12 +204,10 @@ export class VibeTunnelApp extends LitElement {
         e.stopPropagation();
 
         // Get the session number (1-9, 0 = 10)
-        const sessionNumber = e.key === '0' ? 10 : Number.parseInt(e.key);
+        const sessionNumber = e.key === '0' ? 10 : Number.parseInt(e.key, 10);
 
         // Get visible sessions in the same order as the session list
-        const activeSessions = this.sessions.filter(
-          (session) => session.status === 'running' && session.activityStatus?.isActive !== false
-        );
+        const activeSessions = this.sessions.filter((session) => session.status === 'running');
 
         // Check if the requested session exists
         if (sessionNumber > 0 && sessionNumber <= activeSessions.length) {
@@ -449,6 +453,35 @@ export class VibeTunnelApp extends LitElement {
         // Check if user is authenticated via Tailscale
         if (authConfig.tailscaleAuth && authConfig.authenticatedUser) {
           logger.log('🔒 Authenticated via Tailscale:', authConfig.authenticatedUser);
+
+          // Fetch JWT token for WebSocket authentication
+          try {
+            logger.log('🎟️ Fetching WebSocket token for Tailscale user...');
+            const tokenResponse = await fetch('/api/auth/tailscale-token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            });
+
+            if (tokenResponse.ok) {
+              const tokenData = await tokenResponse.json();
+              if (tokenData?.token && authConfig.authenticatedUser) {
+                // Store token and user data for WebSocket connections
+                authClient.setCurrentUserFromToken(
+                  authConfig.authenticatedUser,
+                  tokenData.token,
+                  'tailscale'
+                );
+                logger.log('✅ WebSocket token stored for Tailscale user');
+              } else {
+                logger.warn('⚠️ Tailscale token response missing required data');
+              }
+            } else {
+              logger.warn('⚠️ Failed to fetch WebSocket token, sessions may not load properly');
+            }
+          } catch (tokenError) {
+            logger.warn('⚠️ Error fetching WebSocket token:', tokenError);
+          }
+
           this.isAuthenticated = true;
           this.currentView = 'list';
           await this.initializeServices(noAuthEnabled); // Initialize services with no-auth flag
@@ -523,7 +556,8 @@ export class VibeTunnelApp extends LitElement {
     logger.log('🚀 Initializing services...');
     try {
       // Initialize buffer subscription service for WebSocket connections
-      await bufferSubscriptionService.initialize();
+      await terminalSocketClient.initialize();
+      serverEventService.initialize();
 
       // Initialize push notification service always
       // It handles its own permission checks and user preferences
@@ -539,15 +573,6 @@ export class VibeTunnelApp extends LitElement {
         location: window.location.hostname,
         protocol: window.location.protocol,
       });
-
-      // Initialize control event service for real-time notifications
-      this.controlEventService = getControlEventService(authClient);
-      this.controlEventService.connect();
-
-      // Initialize notification event service to monitor /api/events SSE connection
-      // This is used by the Mac app for notifications
-      notificationEventService.setAuthClient(authClient);
-      await notificationEventService.connect();
 
       this.servicesInitialized = true;
       logger.log('✅ Services initialized successfully');
@@ -624,23 +649,6 @@ export class VibeTunnelApp extends LitElement {
         if (response.ok) {
           const newSessions = (await response.json()) as Session[];
 
-          // Debug: Log sessions with activity status
-          const sessionsWithActivity = newSessions.filter((s) => s.activityStatus);
-          if (sessionsWithActivity.length > 0) {
-            logger.debug(
-              'Sessions with activity status:',
-              sessionsWithActivity.map((s) => ({
-                id: s.id,
-                name: s.name,
-                command: s.command,
-                status: s.status,
-                activityStatus: s.activityStatus,
-              }))
-            );
-          } else {
-            logger.debug('No sessions have activity status');
-          }
-
           // Preserve Git information and reuse existing session objects when possible
           // This prevents unnecessary re-renders by maintaining object references
           const updatedSessions = newSessions.map((newSession) => {
@@ -652,7 +660,6 @@ export class VibeTunnelApp extends LitElement {
                 existingSession.status !== newSession.status ||
                 existingSession.name !== newSession.name ||
                 existingSession.workingDir !== newSession.workingDir ||
-                existingSession.activityStatus !== newSession.activityStatus ||
                 existingSession.exitCode !== newSession.exitCode ||
                 // Check if Git info has been added in the new data
                 (!existingSession.gitRepoPath && newSession.gitRepoPath) ||
@@ -677,7 +684,6 @@ export class VibeTunnelApp extends LitElement {
                 existingSession.status = newSession.status;
                 existingSession.name = newSession.name;
                 existingSession.workingDir = newSession.workingDir;
-                existingSession.activityStatus = newSession.activityStatus;
                 existingSession.exitCode = newSession.exitCode;
                 existingSession.lastModified = newSession.lastModified;
                 existingSession.active = newSession.active;
@@ -694,17 +700,12 @@ export class VibeTunnelApp extends LitElement {
             return newSession;
           });
 
-          // Only update sessions if there are actual changes
-          const hasSessionChanges =
-            updatedSessions.length !== this.sessions.length ||
-            updatedSessions.some((session, index) => session !== this.sessions[index]);
-
-          if (hasSessionChanges) {
-            this.sessions = updatedSessions;
-            // Clear session cache when sessions change
-            this._cachedSelectedSession = undefined;
-            this._cachedSelectedSessionId = null;
-          }
+          // Always assign a new array reference so Lit re-renders reliably.
+          // Note: we still preserve per-session object references above when possible.
+          this.sessions = [...updatedSessions];
+          // Clear session cache when sessions update
+          this._cachedSelectedSession = undefined;
+          this._cachedSelectedSessionId = null;
           this.clearError();
 
           // Update page title if we're in list view
@@ -767,6 +768,7 @@ export class VibeTunnelApp extends LitElement {
     // Use view transition for initial load with fade effect
     if (
       !this.initialLoadComplete &&
+      !this.isTestEnvironment() &&
       'startViewTransition' in document &&
       typeof document.startViewTransition === 'function'
     ) {
@@ -1072,7 +1074,7 @@ export class VibeTunnelApp extends LitElement {
 
     // Disable View Transitions when navigating from session detail view
     // to prevent animations when sidebar is involved
-    const skipViewTransition = this.currentView === 'session';
+    const skipViewTransition = this.currentView === 'session' || this.isTestEnvironment();
 
     // Check if View Transitions API is supported and should be used
     if (
@@ -1096,6 +1098,10 @@ export class VibeTunnelApp extends LitElement {
       this.currentView = 'list';
       this.updateUrl();
     }
+
+    // Ensure list view gets a fresh snapshot after leaving a session view.
+    // This avoids stale session state if the PTY exited while we were connected.
+    this.loadSessions();
   }
 
   private async handleKillAll() {
@@ -1284,7 +1290,9 @@ export class VibeTunnelApp extends LitElement {
   }
 
   private cleanupResizeListeners(): void {
-    this.resizeCleanupFunctions.forEach((cleanup) => cleanup());
+    this.resizeCleanupFunctions.forEach((cleanup) => {
+      cleanup();
+    });
     this.resizeCleanupFunctions = [];
 
     // Reset any global styles that might have been applied
@@ -1474,22 +1482,7 @@ export class VibeTunnelApp extends LitElement {
 
   private setupHotReload(): void {
     // Skip hot reload in test environment
-    const isTestEnvironment =
-      // Check for NODE_ENV=test (set by CI build)
-      (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') ||
-      window.location.search.includes('test=true') ||
-      navigator.userAgent.includes('HeadlessChrome') ||
-      navigator.userAgent.includes('Headless') ||
-      // Check if running in Playwright test context
-      (window as unknown as { __playwright?: unknown }).__playwright !== undefined ||
-      // Check for playwright-specific user agent
-      navigator.userAgent.includes('Playwright') ||
-      // Check for common headless indicators
-      navigator.webdriver === true ||
-      // Check if running on test port
-      window.location.port === '4022';
-
-    if (isTestEnvironment) {
+    if (this.isTestEnvironment()) {
       logger.log('Hot reload disabled in test environment');
       return;
     }
@@ -1518,24 +1511,6 @@ export class VibeTunnelApp extends LitElement {
 
   private setupNotificationHandlers() {
     // Listen for notification settings events
-  }
-
-  private setupPreferences() {
-    // Load preferences from localStorage
-    try {
-      const stored = localStorage.getItem('vibetunnel_app_preferences');
-      if (stored) {
-        JSON.parse(stored); // Parse to validate JSON
-        // Preferences loaded but showLogLink removed
-      }
-    } catch (error) {
-      logger.error('Failed to load app preferences', error);
-    }
-
-    // Listen for preference changes
-    window.addEventListener('app-preferences-changed', () => {
-      // Preference changes handled but showLogLink removed
-    });
   }
 
   private handleOpenSettings = () => {
@@ -1597,7 +1572,7 @@ export class VibeTunnelApp extends LitElement {
       return 'w-full min-h-screen flex flex-col';
     }
 
-    const baseClasses = 'bg-secondary flex flex-col';
+    const baseClasses = 'bg-secondary flex flex-col split-view-sidebar';
     const isMobile = this.mediaState.isMobile;
     // Only apply transition class when animations are ready (not during initial load)
     const transitionClass = this.sidebarAnimationReady && !isMobile ? 'sidebar-transition' : '';
@@ -1628,7 +1603,7 @@ export class VibeTunnelApp extends LitElement {
 
     // Expanded state
     if (isMobile) {
-      return `width: calc(100vw - ${SIDEBAR.MOBILE_RIGHT_MARGIN}px); z-index: ${Z_INDEX.SIDEBAR_MOBILE};`;
+      return `width: 100vw; z-index: ${Z_INDEX.SIDEBAR_MOBILE};`;
     }
 
     return `width: ${this.sidebarWidth}px;`;
@@ -1642,13 +1617,68 @@ export class VibeTunnelApp extends LitElement {
     return this.showSplitView && !this.sidebarCollapsed && !this.mediaState.isMobile;
   }
 
+  /**
+   * Prevent rubber-banding in the sidebar when content is shorter than the viewport.
+   */
+  private setupSidebarScrollLock() {
+    this.teardownSidebarScrollLock();
+
+    if (!this.showSplitView || this.sidebarCollapsed) return;
+
+    const el = this.querySelector('.sidebar-scroll-area') as HTMLElement | null;
+    if (!el) return;
+
+    const hasTouch =
+      'ontouchstart' in window ||
+      navigator.maxTouchPoints > 0 ||
+      'ontouchstart' in document.documentElement;
+    if (!hasTouch) return;
+
+    el.addEventListener('touchstart', this.handleSidebarTouchStart, { passive: true });
+    el.addEventListener('touchmove', this.handleSidebarTouchMove, { passive: false });
+    this.sidebarScrollElement = el;
+  }
+
+  private teardownSidebarScrollLock() {
+    if (!this.sidebarScrollElement) return;
+    this.sidebarScrollElement.removeEventListener('touchstart', this.handleSidebarTouchStart);
+    this.sidebarScrollElement.removeEventListener('touchmove', this.handleSidebarTouchMove);
+    this.sidebarScrollElement = null;
+  }
+
+  private handleSidebarTouchStart = (e: TouchEvent) => {
+    this.sidebarTouchStartY = e.touches[0]?.clientY ?? 0;
+  };
+
+  private handleSidebarTouchMove = (e: TouchEvent) => {
+    const target = this.sidebarScrollElement;
+    if (!target) return;
+
+    const scrollTop = target.scrollTop;
+    const scrollHeight = target.scrollHeight;
+    const clientHeight = target.clientHeight;
+    const deltaY = (e.touches[0]?.clientY ?? 0) - this.sidebarTouchStartY;
+
+    const atTop = scrollTop <= 0;
+    const atBottom = scrollTop + clientHeight >= scrollHeight - 1; // tolerate rounding
+    const scrollingDown = deltaY > 0;
+    const scrollingUp = deltaY < 0;
+    const notScrollable = scrollHeight <= clientHeight + 1;
+
+    if (notScrollable || (atTop && scrollingDown) || (atBottom && scrollingUp)) {
+      // Block rubber-band that would move the parent
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
   private get mainContainerClasses(): string {
     // In split view, we need strict height control and overflow hidden
     // In main view, we need normal document flow for scrolling
     if (this.showSplitView) {
       // Add iOS-specific class to prevent rubber band scrolling
       const iosClass = isIOS() ? 'ios-split-view' : '';
-      return `flex h-screen overflow-hidden relative ${iosClass}`;
+      return `flex overflow-hidden relative split-view-root ${iosClass}`;
     }
     return 'min-h-screen';
   }
@@ -1796,13 +1826,15 @@ export class VibeTunnelApp extends LitElement {
             @logout=${this.handleLogout}
             @navigate-to-list=${this.handleNavigateToList}
             @toggle-sidebar=${this.handleToggleSidebar}
+            style="touch-action: none;"
           ></app-header>
-          <div class="${this.showSplitView ? 'flex-1 overflow-y-auto' : 'flex-1'} bg-secondary">
+          <div class="${this.showSplitView ? 'flex-1 sidebar-scroll-area' : 'flex-1'} bg-secondary">
             <session-list
               .sessions=${this.sessions}
               .loading=${this.loading}
               .hideExited=${this.hideExited}
               .selectedSessionId=${this.selectedSessionId}
+              .activeSessionId=${this.selectedSessionId}
               .compactMode=${showSplitView}
               .collapsed=${this.sidebarCollapsed}
               .authClient=${authClient}
@@ -1872,15 +1904,11 @@ export class VibeTunnelApp extends LitElement {
         .visible=${this.showSettings}
         .authClient=${authClient}
         @close=${this.handleCloseSettings}
-        @notifications-enabled=${async () => {
+        @notifications-enabled=${() => {
           this.showSuccess('Notifications enabled');
-          // Reconnect SSE when notifications are enabled
-          await notificationEventService.connect();
         }}
         @notifications-disabled=${() => {
           this.showSuccess('Notifications disabled');
-          // Disconnect SSE when notifications are disabled
-          notificationEventService.disconnect();
         }}
         @success=${(e: CustomEvent) => this.showSuccess(e.detail)}
         @error=${(e: CustomEvent) => this.showError(e.detail)}
@@ -1902,9 +1930,6 @@ export class VibeTunnelApp extends LitElement {
         @cancel=${this.handleCreateModalClose}
         @error=${this.handleError}
       ></session-create-form>
-
-      <!-- Git Notification Handler -->
-      <git-notification-handler></git-notification-handler>
 
       <!-- Multiplexer Modal (tmux/Zellij) -->
       <multiplexer-modal

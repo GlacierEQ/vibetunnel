@@ -214,7 +214,6 @@
 /* Begin PBXShellScriptBuildPhase section */
 		A1B2C3D4E5F6789012345678 /* Calculate Web Hash */ = {
 			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -515,6 +514,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = sh.vibetunnel.vibetunnel.tests.debug;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/VibeTunnel.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/VibeTunnel";
 			};
 			name = Debug;
@@ -532,6 +532,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = sh.vibetunnel.vibetunnel.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/VibeTunnel.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/VibeTunnel";
 			};
 			name = Release;
@@ -574,7 +575,7 @@
 			repositoryURL = "https://github.com/apple/swift-log.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 1.6.3;
+				minimumVersion = 1.8.0;
 			};
 		};
 		89D01D842CB5D7DC0075D8BD /* XCRemoteSwiftPackageReference "Sparkle" */ = {
@@ -582,7 +583,7 @@
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.7.0;
+				minimumVersion = 2.8.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

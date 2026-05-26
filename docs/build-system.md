@@ -93,7 +93,7 @@ cd mac
 
 **Development Tools**:
 - Xcode 16.0+ with command line tools
-- Node.js 20+ and pnpm
+- Node.js 22.12+ and pnpm
 - Bun runtime (installed via npm)
 - xcbeautify (optional, for cleaner output)
 
@@ -110,7 +110,7 @@ cd mac
 ### Web Frontend Requirements
 
 **Tools**:
-- Node.js 20+ with npm
+- Node.js 22.12+ with npm
 - Bun runtime for standalone builds
 
 **Native Modules**:
@@ -120,6 +120,21 @@ cd mac
   - `spawn-helper` - Process spawning helper
   - `vibetunnel` - Bun executable
 
+### Linux (Ubuntu) Requirements
+
+**Packages**:
+- `curl`, `ca-certificates`, `xz-utils`, `python3`, `make`, `g++`, `git`
+- `libpam0g-dev` (authenticate-pam native module)
+
+**Tooling**:
+- Node.js 22.12+ (NodeSource 24.x OK)
+- Zig (latest stable)
+
+**Bootstrap**:
+```bash
+web/scripts/linux-bootstrap.sh
+```
+
 ### iOS Requirements
 
 **Tools**:
@@ -128,7 +143,7 @@ cd mac
 - iOS 18.0+ deployment target
 
 **Dependencies**:
-- SwiftTerm package via SPM
+- ghostty-web resources (JS + WASM) bundled in the iOS app
 
 ## Reference
 
